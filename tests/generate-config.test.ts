@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -64,6 +72,44 @@ it("leaves existing artifacts intact when YAML validation fails", async () => {
   await expect(
     readFile(join(outputDir, "wrangler.jsonc"), "utf8"),
   ).resolves.toBe("previous wrangler");
+});
+
+it("restores the prior artifact pair when the second publication fails", async () => {
+  const { configPath, outputDir } = await fixture();
+  const generatedConfigPath = join(outputDir, "config.ts");
+  const generatedWranglerPath = join(outputDir, "wrangler.jsonc");
+  const publicationFailure = new Error("second publication failed");
+  let publicationFailed = false;
+  await mkdir(outputDir);
+  await writeFile(generatedConfigPath, "previous config");
+  await writeFile(generatedWranglerPath, "previous wrangler");
+
+  await expect(
+    generateServerlessArtifacts(configPath, outputDir, {
+      rename: async (from, to) => {
+        if (
+          !publicationFailed &&
+          from.startsWith(`${generatedWranglerPath}.`) &&
+          to === generatedWranglerPath
+        ) {
+          publicationFailed = true;
+          throw publicationFailure;
+        }
+        await rename(from, to);
+      },
+    }),
+  ).rejects.toBe(publicationFailure);
+
+  await expect(readFile(generatedConfigPath, "utf8")).resolves.toBe(
+    "previous config",
+  );
+  await expect(readFile(generatedWranglerPath, "utf8")).resolves.toBe(
+    "previous wrangler",
+  );
+  await expect(readdir(outputDir)).resolves.toEqual([
+    "config.ts",
+    "wrangler.jsonc",
+  ]);
 });
 
 async function fixture(

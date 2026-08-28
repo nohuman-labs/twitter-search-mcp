@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../src/config/load.js";
@@ -27,13 +27,20 @@ export type ServerlessArtifacts = {
   readonly wrangler: WranglerConfig;
 };
 
+type Rename = (from: string, to: string) => Promise<void>;
+
+export type GenerateConfigDependencies = {
+  readonly rename?: Rename;
+};
+
 export async function generateServerlessArtifacts(
   configPath: string,
   outputDir: string,
+  dependencies: GenerateConfigDependencies = {},
 ): Promise<ServerlessArtifacts> {
   const config = await loadConfig(configPath);
   const artifacts = createArtifacts(config);
-  await writeArtifacts(outputDir, artifacts);
+  await writeArtifacts(outputDir, artifacts, dependencies.rename ?? rename);
   return artifacts;
 }
 
@@ -72,29 +79,129 @@ function windowSeconds(window: AppConfig["ratelimit"]["window"]): 10 | 60 {
 async function writeArtifacts(
   outputDir: string,
   artifacts: ServerlessArtifacts,
+  renameFile: Rename,
 ): Promise<void> {
   await mkdir(outputDir, { recursive: true });
   const suffix = `${process.pid}-${Date.now()}`;
   const configPath = join(outputDir, "config.ts");
   const wranglerPath = join(outputDir, "wrangler.jsonc");
-  const temporaryConfigPath = `${configPath}.${suffix}.tmp`;
-  const temporaryWranglerPath = `${wranglerPath}.${suffix}.tmp`;
+  const publications = await Promise.all([
+    createPublication(configPath, `${configPath}.${suffix}.tmp`),
+    createPublication(wranglerPath, `${wranglerPath}.${suffix}.tmp`),
+  ]);
 
+  let publicationError: unknown;
   try {
     await Promise.all([
-      writeFile(temporaryConfigPath, artifacts.moduleSource),
+      writeFile(publications[0].temporaryPath, artifacts.moduleSource),
       writeFile(
-        temporaryWranglerPath,
+        publications[1].temporaryPath,
         `${JSON.stringify(artifacts.wrangler, null, 2)}\n`,
       ),
     ]);
-    await rename(temporaryConfigPath, configPath);
-    await rename(temporaryWranglerPath, wranglerPath);
-  } finally {
-    await Promise.all([
-      rm(temporaryConfigPath, { force: true }),
-      rm(temporaryWranglerPath, { force: true }),
-    ]);
+    await backupPublications(publications, renameFile);
+    await publishPublications(publications, renameFile);
+  } catch (error) {
+    publicationError = error;
+    try {
+      await rollbackPublications(publications, renameFile);
+    } catch {
+      // Preserve the publication failure for callers.
+    }
+  }
+
+  try {
+    await cleanupPublications(publications);
+  } catch (error) {
+    if (publicationError === undefined) {
+      throw error;
+    }
+  }
+
+  if (publicationError !== undefined) {
+    throw publicationError;
+  }
+}
+
+type Publication = {
+  readonly targetPath: string;
+  readonly temporaryPath: string;
+  readonly backupPath: string;
+  readonly hadPreviousArtifact: boolean;
+  backedUp: boolean;
+  published: boolean;
+};
+
+async function createPublication(
+  targetPath: string,
+  temporaryPath: string,
+): Promise<Publication> {
+  return {
+    targetPath,
+    temporaryPath,
+    backupPath: `${temporaryPath}.backup`,
+    hadPreviousArtifact: await exists(targetPath),
+    backedUp: false,
+    published: false,
+  };
+}
+
+async function backupPublications(
+  publications: readonly Publication[],
+  renameFile: Rename,
+): Promise<void> {
+  for (const publication of publications) {
+    if (publication.hadPreviousArtifact) {
+      await renameFile(publication.targetPath, publication.backupPath);
+      publication.backedUp = true;
+    }
+  }
+}
+
+async function publishPublications(
+  publications: readonly Publication[],
+  renameFile: Rename,
+): Promise<void> {
+  for (const publication of publications) {
+    await renameFile(publication.temporaryPath, publication.targetPath);
+    publication.published = true;
+  }
+}
+
+async function rollbackPublications(
+  publications: readonly Publication[],
+  renameFile: Rename,
+): Promise<void> {
+  for (const publication of publications.toReversed()) {
+    if (publication.published) {
+      await rm(publication.targetPath, { force: true });
+    }
+    if (publication.backedUp) {
+      await renameFile(publication.backupPath, publication.targetPath);
+    }
+  }
+}
+
+async function cleanupPublications(
+  publications: readonly Publication[],
+): Promise<void> {
+  await Promise.all(
+    publications.flatMap((publication) => [
+      rm(publication.temporaryPath, { force: true }),
+      rm(publication.backupPath, { force: true }),
+    ]),
+  );
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
   }
 }
 
