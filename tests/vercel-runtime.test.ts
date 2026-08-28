@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, it, vi } from "vitest";
 import healthz from "../api/healthz.js";
+import mcp from "../api/mcp.js";
 import readyz from "../api/readyz.js";
 import type { AppConfig } from "../src/config/schema.js";
 import { createVercelHandler } from "../src/runtimes/vercel.js";
@@ -137,15 +138,26 @@ it("limits requests independently per Vercel handler instance", async () => {
   ).toBe(200);
 });
 
-it("exposes generic Vercel health handlers", async () => {
+it("exports Vercel Web-function default handlers", async () => {
+  expect(mcp.fetch).toBeTypeOf("function");
+  expect(healthz.fetch).toBeTypeOf("function");
+  expect(readyz.fetch).toBeTypeOf("function");
+
+  expect(
+    (await mcp.fetch(new Request("https://example.test/api/mcp"))).status,
+  ).toBe(405);
   await expect(
-    healthz(new Request("https://example.test/api/healthz")).json(),
+    healthz
+      .fetch(new Request("https://example.test/api/healthz"))
+      .then((response) => response.json()),
   ).resolves.toMatchObject({
     service: "twitter-search-mcp",
     ready: true,
   });
   await expect(
-    readyz(new Request("https://example.test/api/readyz")).json(),
+    readyz
+      .fetch(new Request("https://example.test/api/readyz"))
+      .then((response) => response.json()),
   ).resolves.toMatchObject({
     service: "twitter-search-mcp",
     ready: true,

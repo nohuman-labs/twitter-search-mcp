@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "check": "biome check . && tsc --noEmit && vitest run",
     "dev": "tsx src/runtimes/node.ts",
     "doctor": "tsx scripts/doctor.ts",
