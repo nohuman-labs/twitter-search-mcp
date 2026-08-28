@@ -164,13 +164,13 @@ it("returns pending after bounded empty polling", async () => {
   ]);
 });
 
-it("returns partial for refreshing materialized results", async () => {
+it("returns partial when nonempty work is still loading", async () => {
   const payload = await fixture("latest-ready.json");
   const data = structuredClone(payload) as {
     data: { latest: { status: string; materialized: boolean } };
   };
-  data.data.latest.status = "refreshing";
-  data.data.latest.materialized = true;
+  data.data.latest.status = "loading_more";
+  data.data.latest.materialized = false;
   const fetch = vi.fn(async () => new Response(JSON.stringify(data)));
   const provider = createTwiteeProvider({
     baseUrl: "https://twitee.test",
@@ -184,6 +184,27 @@ it("returns partial for refreshing materialized results", async () => {
       .status,
   ).toBe("partial");
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("does not return a near-match profile for an exact lookup", async () => {
+  const payload = await fixture("people-ready.json");
+  const data = structuredClone(payload) as {
+    data: { people: { items: Array<{ handle: string }> } };
+  };
+  data.data.people.items = data.data.people.items.filter(
+    (profile) => profile.handle !== "openai",
+  );
+  const provider = createTwiteeProvider({
+    baseUrl: "https://twitee.test",
+    token: "",
+    fetch: async () => new Response(JSON.stringify(data)),
+    sleep: async () => {},
+  });
+
+  const result = await provider.lookupProfile({ handle: "openai" });
+
+  expect(result.status).toBe("ready");
+  expect(result.items).toEqual([]);
 });
 
 it("maps Twitee rate limits without exposing the upstream body", async () => {

@@ -214,11 +214,10 @@ export function createTwiteeProvider(
       if (value === undefined) {
         throw unavailable();
       }
-      const materialized = value.materialized ?? value.items.length > 0;
       if (value.status === "ready") {
         return { envelope, branch: value, status: "ready" };
       }
-      if (materialized) {
+      if (value.items.length > 0) {
         return { envelope, branch: value, status: "partial" };
       }
       if (attempt + 1 === maxPollAttempts) {
@@ -333,7 +332,10 @@ export function createTwiteeProvider(
       return {
         provider: "twitee",
         status: response.status,
-        items: response.branch.items.map(mapProfile),
+        items: response.branch.items
+          .filter((item) => item.handle.toLowerCase() === query.slice(1))
+          .slice(0, 1)
+          .map(mapProfile),
         pagination: { next_cursor: null, has_more: false },
         metadata: metadata(response.envelope),
       };

@@ -24,6 +24,30 @@
           "sourceUrl": "https://x.com/openai",
           "collectedAt": "2026-08-28T00:00:00.000Z",
           "fetchedAt": "2026-08-28T00:00:00.000Z"
+        },
+        {
+          "handle": "openai_news",
+          "displayName": "OpenAI News",
+          "avatarUrl": "https://cdn.twitee.test/openai-news.jpg",
+          "bio": "A near match",
+          "followersCount": 10,
+          "verified": false,
+          "rank": 2,
+          "sourceUrl": "https://x.com/openai_news",
+          "collectedAt": "2026-08-28T00:00:00.000Z",
+          "fetchedAt": "2026-08-28T00:00:00.000Z"
+        },
+        {
+          "handle": "openaibot",
+          "displayName": "OpenAI Bot",
+          "avatarUrl": "https://cdn.twitee.test/openaibot.jpg",
+          "bio": "Another near match",
+          "followersCount": 5,
+          "verified": false,
+          "rank": 3,
+          "sourceUrl": "https://x.com/openaibot",
+          "collectedAt": "2026-08-28T00:00:00.000Z",
+          "fetchedAt": "2026-08-28T00:00:00.000Z"
         }
       ]
     }
