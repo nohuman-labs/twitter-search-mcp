@@ -1,2 +1,6 @@
 .worktrees/
-
+node_modules/
+mcp.config.yaml
+.generated/
+dist/
+coverage/

@@ -1,0 +1,24 @@
+version: 1
+
+access:
+  mode: anonymous
+  token: ""
+
+search:
+  default_provider: twitee
+  allow_provider_override: false
+
+providers:
+  twitee:
+    enabled: true
+    base_url: https://twitee.co
+    token: ""
+  x:
+    enabled: false
+    base_url: https://api.x.com
+    token: ""
+
+ratelimit:
+  enabled: true
+  limit: 60
+  window: 10s

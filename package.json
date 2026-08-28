@@ -1,0 +1,51 @@
+{
+  "name": "twitter-search-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "tsc",
+    "check": "biome check . && tsc --noEmit && vitest run",
+    "dev": "tsx src/runtimes/node.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "test": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/runtimes/node.d.ts",
+      "import": "./dist/runtimes/node.js"
+    },
+    "./vercel": {
+      "types": "./dist/runtimes/vercel.d.ts",
+      "import": "./dist/runtimes/vercel.js"
+    }
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "0.22.0",
+    "hono": "4.13.5",
+    "mcp-handler": "2.1.1",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.0"
+  }
+}
