@@ -50,6 +50,20 @@ it("does not fallback when the default lacks a capability", () => {
   );
 });
 
+it("rejects providers that claim profile search without implementing it", () => {
+  const registry = new ProviderRegistry(config, [
+    provider("x", {
+      searchPosts: true,
+      lookupProfile: true,
+      searchProfiles: true,
+    }),
+  ]);
+
+  expect(() => registry.resolve("search_profiles")).toThrowError(
+    expect.objectContaining({ code: "CONFIG_INVALID" }),
+  );
+});
+
 it("rejects disabled selected providers before checking capabilities", () => {
   const disabledX = structuredClone(config);
   disabledX.providers.x.enabled = false;

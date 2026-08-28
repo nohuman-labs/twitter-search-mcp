@@ -51,6 +51,13 @@ export class ProviderRegistry {
       );
     }
 
+    if (tool === "search_profiles" && provider.searchProfiles === undefined) {
+      throw new SafeError(
+        "CONFIG_INVALID",
+        "Selected provider declares an unimplemented capability",
+      );
+    }
+
     return provider;
   }
 }

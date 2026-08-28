@@ -37,6 +37,24 @@ it("round-trips valid cursors", () => {
   ).toEqual({ page: 2, generation: "g1" });
 });
 
+it("round-trips Unicode cursor context and continuation", () => {
+  const cursor = encodeCursor({
+    v: 1,
+    tool: "search_posts",
+    provider: "x",
+    query: "m\u00e8o \ud83d\ude3a",
+    continuation: { page_marker: "ti\u1ebfp \ud83d\ude80" },
+  });
+
+  expect(
+    decodeCursor(cursor, {
+      tool: "search_posts",
+      provider: "x",
+      query: "m\u00e8o \ud83d\ude3a",
+    }),
+  ).toEqual({ page_marker: "ti\u1ebfp \ud83d\ude80" });
+});
+
 it("rejects malformed cursors", () => {
   expect(() =>
     decodeCursor("not-base64url", {

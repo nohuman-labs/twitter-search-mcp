@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { z } from "zod";
 import { SafeError } from "./errors.js";
 import type { ProviderId, ToolName } from "./types.js";
@@ -17,8 +16,37 @@ export type Cursor = z.infer<typeof cursorSchema>;
 
 export type CursorContext = Pick<Cursor, "tool" | "provider" | "query">;
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
+
+const encodeBase64Url = (value: string): string => {
+  const bytes = textEncoder.encode(value);
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+};
+
+const decodeBase64Url = (value: string): string => {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error("Invalid base64url");
+  }
+
+  const padded = `${value.replaceAll("-", "+").replaceAll("_", "/")}${"=".repeat((4 - (value.length % 4)) % 4)}`;
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+
+  return textDecoder.decode(bytes);
+};
+
 export const encodeCursor = (cursor: Cursor): string =>
-  Buffer.from(JSON.stringify(cursorSchema.parse(cursor))).toString("base64url");
+  encodeBase64Url(JSON.stringify(cursorSchema.parse(cursor)));
 
 export const decodeCursor = (
   cursor: string,
@@ -27,7 +55,7 @@ export const decodeCursor = (
   let value: unknown;
 
   try {
-    value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    value = JSON.parse(decodeBase64Url(cursor));
   } catch {
     throw new SafeError("INVALID_INPUT", "Invalid cursor");
   }
