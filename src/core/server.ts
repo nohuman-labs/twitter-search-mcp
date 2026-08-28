@@ -1,0 +1,71 @@
+import { McpServer } from "@modelcontextprotocol/server";
+import type { AppConfig } from "../config/schema.js";
+import type { SearchProvider } from "../providers/provider.js";
+import { ProviderRegistry } from "../providers/registry.js";
+import { createTwiteeProvider } from "../providers/twitee.js";
+import { createXProvider } from "../providers/x.js";
+import { registerSearchTools } from "../tools/register.js";
+
+type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export type McpServerDependencies = {
+  readonly fetch: FetchLike;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+};
+
+const serverVersion = "1.0.0";
+
+export function createMcpServer(
+  config: AppConfig,
+  dependencies: McpServerDependencies,
+): McpServer {
+  const providers = createProviders(config, dependencies);
+  const server = new McpServer({
+    name: "twitter-search-mcp",
+    version: serverVersion,
+  });
+
+  registerSearchTools(server, {
+    registry: new ProviderRegistry(config, providers),
+    providers,
+  });
+
+  return server;
+}
+
+function createProviders(
+  config: AppConfig,
+  dependencies: McpServerDependencies,
+): SearchProvider[] {
+  const providers: SearchProvider[] = [];
+
+  if (config.providers.twitee.enabled) {
+    providers.push(
+      createTwiteeProvider({
+        baseUrl: config.providers.twitee.base_url,
+        token: config.providers.twitee.token,
+        fetch: dependencies.fetch,
+        sleep: dependencies.sleep ?? ((milliseconds) => delay(milliseconds)),
+      }),
+    );
+  }
+
+  if (config.providers.x.enabled) {
+    providers.push(
+      createXProvider({
+        baseUrl: config.providers.x.base_url,
+        token: config.providers.x.token,
+        fetch: dependencies.fetch,
+      }),
+    );
+  }
+
+  return providers;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
