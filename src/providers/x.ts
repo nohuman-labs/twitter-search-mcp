@@ -79,6 +79,7 @@ const postFields = "created_at,public_metrics,author_id,attachments";
 const userFields =
   "id,name,username,description,profile_image_url,verified,public_metrics";
 const mediaFields = "media_key,type,url,preview_image_url";
+const minimumXResults = 10;
 const maxResults = 50;
 
 export function createXProvider(options: XProviderOptions): SearchProvider {
@@ -118,9 +119,10 @@ export function createXProvider(options: XProviderOptions): SearchProvider {
     ): Promise<SearchPostsResult> => {
       const nextToken = continuationFor(input.cursor, input.query);
       const limit = Math.min(input.limit, maxResults);
+      const upstreamLimit = Math.max(minimumXResults, limit);
       const params = new URLSearchParams({
         query: input.query,
-        max_results: String(limit),
+        max_results: String(upstreamLimit),
         expansions: "author_id,attachments.media_keys",
         "tweet.fields": postFields,
         "user.fields": userFields,

@@ -52,6 +52,21 @@ it("uses the configured URL, bearer token, and required post fields", async () =
   });
 });
 
+it("uses X's legal minimum page size while honoring a smaller result limit", async () => {
+  const fetch = fixtureFetch("recent-search.json");
+  const provider = createXProvider({ ...options(), fetch });
+
+  const result = await provider.searchPosts({
+    query: "mcp",
+    limit: 3,
+    cursor: null,
+  });
+
+  const [url] = fetch.mock.calls[0] ?? [];
+  expect(new URL(url as string).searchParams.get("max_results")).toBe("10");
+  expect(result.items.length).toBeLessThanOrEqual(3);
+});
+
 it("normalizes posts, caps output, and wraps the X continuation", async () => {
   const payload = (await fixture("recent-search.json")) as {
     data: unknown[];
