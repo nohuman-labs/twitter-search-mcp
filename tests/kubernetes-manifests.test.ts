@@ -38,6 +38,14 @@ describe("Kubernetes manifests", () => {
     expect(container.volumeMounts).toContainEqual(
       expect.objectContaining({ mountPath: "/config", readOnly: true }),
     );
+    expect(container.volumeMounts).toContainEqual({
+      name: "tmp",
+      mountPath: "/tmp",
+    });
+    expect(deployment.spec.template.spec.volumes).toContainEqual({
+      name: "tmp",
+      emptyDir: { medium: "Memory", sizeLimit: "16Mi" },
+    });
     expect(container.livenessProbe.httpGet.path).toBe("/healthz");
     expect(container.readinessProbe.httpGet.path).toBe("/readyz");
   });

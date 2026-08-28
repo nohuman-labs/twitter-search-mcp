@@ -77,7 +77,13 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: config
           configMap:
             name: twitter-search-mcp-config
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
