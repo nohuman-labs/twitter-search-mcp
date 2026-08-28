@@ -18,8 +18,16 @@ describe("Kubernetes manifests", () => {
       runAsNonRoot: true,
       runAsUser: 10001,
       runAsGroup: 10001,
+      fsGroup: 10001,
+      fsGroupChangePolicy: "OnRootMismatch",
       seccompProfile: { type: "RuntimeDefault" },
     });
+    expect(deployment.spec.template.spec.securityContext.fsGroup).toBe(
+      deployment.spec.template.spec.securityContext.runAsGroup,
+    );
+    expect(deployment.spec.template.spec.securityContext.fsGroup).toBe(
+      deployment.spec.template.spec.securityContext.runAsUser,
+    );
     expect(container.args).toEqual([
       "dist/runtimes/node.js",
       "--config",
