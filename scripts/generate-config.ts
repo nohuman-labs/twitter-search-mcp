@@ -172,7 +172,7 @@ async function rollbackPublications(
   publications: readonly Publication[],
   renameFile: Rename,
 ): Promise<void> {
-  for (const publication of publications.toReversed()) {
+  for (const publication of [...publications].reverse()) {
     if (publication.published) {
       await rm(publication.targetPath, { force: true });
     }

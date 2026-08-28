@@ -18,7 +18,7 @@ afterEach(async () => {
   );
 });
 
-it("reports validated enabled providers and rate-limit scopes without tokens", async () => {
+it("reports configured rate-limit deployment limitations when enabled", async () => {
   const directory = await mkdtemp(join(tmpdir(), "twitter-search-mcp-"));
   directories.push(directory);
   const configPath = join(directory, "mcp.config.yaml");
@@ -34,13 +34,39 @@ it("reports validated enabled providers and rate-limit scopes without tokens", a
   expect(result.output).toContain(
     "Provider twitee: search_posts, lookup_profile, search_profiles",
   );
+  expect(result.output).toContain("Rate limiting: enabled (60 per 1m)");
   expect(result.output).toContain(
-    "Cloudflare: edge-local and eventually consistent",
+    "Configured rate-limit deployment scopes and limitations:",
+  );
+  expect(result.output).toContain(
+    "Cloudflare: requires generated MCP_RATE_LIMITER binding; edge-local and eventually consistent",
   );
   expect(result.output).toContain("Node: per-process");
   expect(result.output).toContain("Kubernetes: per-replica");
   expect(result.output).toContain("Vercel: per-instance");
   expect(result.output).not.toContain("doctor-secret");
+});
+
+it("reports disabled rate limiting without claiming configured runtime scopes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "twitter-search-mcp-"));
+  directories.push(directory);
+  const configPath = join(directory, "mcp.config.yaml");
+  await writeFile(
+    configPath,
+    configYaml("http://127.0.0.1:1", "doctor-secret", false),
+  );
+
+  const result = await runCli("scripts/doctor.ts", ["--config", configPath]);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.output).toContain("Rate limiting: disabled");
+  expect(result.output).not.toContain(
+    "Configured rate-limit deployment scopes and limitations:",
+  );
+  expect(result.output).not.toContain("Cloudflare:");
+  expect(result.output).not.toContain("Node: per-process");
+  expect(result.output).not.toContain("Kubernetes: per-replica");
+  expect(result.output).not.toContain("Vercel: per-instance");
 });
 
 it("does not contact enabled providers unless connectivity is requested", async () => {
@@ -154,7 +180,11 @@ it("uses the MCP client to list tools and only calls caller-supplied fixture inp
   }
 });
 
-function configYaml(baseUrl: string, token: string): string {
+function configYaml(
+  baseUrl: string,
+  token: string,
+  rateLimitEnabled = true,
+): string {
   return `version: 1
 access:
   mode: anonymous
@@ -172,7 +202,7 @@ providers:
     base_url: https://api.x.com
     token: ""
 ratelimit:
-  enabled: true
+  enabled: ${rateLimitEnabled}
   limit: 60
   window: 1m
 `;

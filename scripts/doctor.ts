@@ -25,10 +25,15 @@ async function run(): Promise<void> {
   console.log(
     `Rate limiting: ${config.ratelimit.enabled ? `enabled (${config.ratelimit.limit} per ${config.ratelimit.window})` : "disabled"}`,
   );
-  console.log("Cloudflare: edge-local and eventually consistent");
-  console.log("Node: per-process");
-  console.log("Kubernetes: per-replica");
-  console.log("Vercel: per-instance");
+  if (config.ratelimit.enabled) {
+    console.log("Configured rate-limit deployment scopes and limitations:");
+    console.log(
+      "Cloudflare: requires generated MCP_RATE_LIMITER binding; edge-local and eventually consistent",
+    );
+    console.log("Node: per-process");
+    console.log("Kubernetes: per-replica");
+    console.log("Vercel: per-instance");
+  }
 
   if (options.connectivity) {
     const results = await Promise.all(
