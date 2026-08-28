@@ -114,8 +114,11 @@ it.each([
       gh: `#!/bin/sh
 printf '%s\n' "$*" >> "$RELEASE_TEST_LOG"
 if [ "$1 $2" = "release view" ]; then
-  [ "$RELEASE_TEST_RELEASE_EXISTS" = "true" ]
-  exit $?
+  if [ "$RELEASE_TEST_RELEASE_EXISTS" = "true" ]; then
+    exit 0
+  fi
+  echo 'release not found' >&2
+  exit 1
 fi
 exit 0
 `,
@@ -130,6 +133,31 @@ exit 0
     expect(calls.at(-1)).toBe(expected);
   },
 );
+
+it("fails closed when GitHub Release state cannot be determined", async () => {
+  const fixture = await releaseFixture({
+    gh: `#!/bin/sh
+printf '%s\n' "$*" >> "$RELEASE_TEST_LOG"
+if [ "$1 $2" = "release view" ]; then
+  echo 'private-github-diagnostic' >&2
+  exit 1
+fi
+exit 0
+`,
+  });
+
+  const error = await runRelease(fixture, ["release", "v1.0.0", "notes.md"], {
+    RELEASE_TEST_LOG: fixture.log,
+  }).catch((caught: unknown) => caught as { stderr: string });
+
+  expect(error.stderr).toContain(
+    "Unable to determine GitHub Release publication state",
+  );
+  expect(error.stderr).not.toContain("private-github-diagnostic");
+  await expect(readFile(fixture.log, "utf8")).resolves.toBe(
+    "release view v1.0.0\n",
+  );
+});
 
 const fakeDocker = `#!/bin/sh
 reference="$4"

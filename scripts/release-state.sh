@@ -89,11 +89,20 @@ resolve_image() {
 publish_release() {
   tag="$1"
   notes_file="$2"
-  if gh release view "$tag" >/dev/null 2>&1; then
+  set +e
+  result="$(gh release view "$tag" 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then
     gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
-  else
-    gh release create "$tag" --title "$tag" --notes-file "$notes_file"
+    return
   fi
+  if printf '%s' "$result" | grep -Eqi 'release not found'; then
+    gh release create "$tag" --title "$tag" --notes-file "$notes_file"
+    return
+  fi
+  echo "Unable to determine GitHub Release publication state." >&2
+  exit 1
 }
 
 case "${1:-}" in
