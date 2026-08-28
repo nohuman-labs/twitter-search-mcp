@@ -33,8 +33,13 @@ safe code fields; it did not contain the search query.
 ## Cloudflare Workers
 
 - Wrangler 4.127.0 dry-run: PASS
+- Wrangler local Worker runtime: PASS
 - Generated configuration: credential-free anonymous Twitee configuration
 - Remote deployment: BLOCKED before upload
+
+The local Worker runtime returned 200 from `/healthz` and `/readyz`, completed
+MCP initialize and `tools/list`, advertised all three Twitee tools, returned 405
+from `GET /mcp`, and returned 404 from `GET /sse`.
 
 The local Wrangler session is not authenticated. The supported temporary
 deployment path requested explicit acceptance of Cloudflare's Terms of Service
