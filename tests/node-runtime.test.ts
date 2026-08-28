@@ -250,6 +250,38 @@ it("tears down request-scoped MCP resources after dispatch errors", async () => 
   }
 });
 
+it("closes a constructed transport when the MCP server factory throws", async () => {
+  const transport = {
+    handleRequest: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory: () => {
+      throw new Error("server factory failed");
+    },
+    transportFactory: () => transport,
+  });
+
+  try {
+    const response = await fetch(`${serverAddress(server)}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "Request could not be completed",
+    });
+    expect(transport.close).toHaveBeenCalledOnce();
+  } finally {
+    await closeServer(server);
+  }
+});
+
 it("rate limits MCP POSTs while allowing OPTIONS to bypass the limiter", async () => {
   const limiter = {
     take: vi

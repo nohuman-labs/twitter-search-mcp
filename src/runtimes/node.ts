@@ -191,9 +191,12 @@ async function handleMcpRequest(
     }
 
     const transport = transportFactory();
-    const mcpServer = mcpServerFactory(config, dependencies);
+    let mcpServer: ReturnType<typeof createMcpServer> | undefined;
     const teardown = once(async () => {
-      await Promise.allSettled([transport.close(), mcpServer.close()]);
+      await Promise.allSettled([
+        transport.close(),
+        ...(mcpServer === undefined ? [] : [mcpServer.close()]),
+      ]);
     });
     const abort = () => {
       void teardown();
@@ -202,6 +205,7 @@ async function handleMcpRequest(
     response.once("close", abort);
 
     try {
+      mcpServer = mcpServerFactory(config, dependencies);
       await mcpServer.connect(transport);
       await transport.handleRequest(request, response);
       logger({ method: "POST", path: MCP_PATH, status: response.statusCode });
