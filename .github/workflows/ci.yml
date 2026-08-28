@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Create credential-free configuration
+        run: cp mcp.config.example.yaml mcp.config.yaml
+      - run: make check
+      - run: make build
+      - run: npm run generate:config
+      - name: Validate generated Cloudflare configuration
+        run: npx wrangler deploy --dry-run --config .generated/wrangler.jsonc
+
+  container:
+    name: Container and Kubernetes
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -f deploy/docker/Dockerfile -t twitter-search-mcp:ci .
+      - run: sh tests/container-smoke.sh twitter-search-mcp:ci
+      - run: kubectl kustomize deploy/kubernetes/overlays/example >/dev/null
