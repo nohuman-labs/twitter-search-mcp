@@ -1,0 +1,14 @@
+{
+  "data": {
+    "id": "42",
+    "name": "OpenAI",
+    "username": "openai",
+    "description": "AI research and deployment",
+    "profile_image_url": "https://cdn.x.test/openai.jpg",
+    "verified": true,
+    "public_metrics": {
+      "followers_count": 1000,
+      "following_count": 10
+    }
+  }
+}

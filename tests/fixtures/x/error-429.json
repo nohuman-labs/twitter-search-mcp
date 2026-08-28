@@ -1,0 +1,5 @@
+{
+  "title": "Too Many Requests",
+  "detail": "secret upstream diagnostic",
+  "type": "https://api.x.com/2/problems/usage-capped"
+}
