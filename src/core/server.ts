@@ -23,18 +23,25 @@ export function createMcpServer(
   config: AppConfig,
   dependencies: McpServerDependencies,
 ): McpServer {
-  const providers = createProviders(config, dependencies);
   const server = new McpServer({
     name: "twitter-search-mcp",
     version: serverVersion,
   });
 
+  registerMcpServer(server, config, dependencies);
+  return server;
+}
+
+export function registerMcpServer(
+  server: McpServer,
+  config: AppConfig,
+  dependencies: McpServerDependencies,
+): void {
+  const providers = createProviders(config, dependencies);
   registerSearchTools(server, {
     registry: new ProviderRegistry(config, providers),
     providers,
   });
-
-  return server;
 }
 
 function createProviders(
