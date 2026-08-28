@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "data": {
+    "query": "mcp",
+    "latest": {
+      "generation": "search:query-1:request-1:7",
+      "status": "ready",
+      "materialized": true,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "totalPages": 2,
+        "hasMore": true
+      },
+      "items": [
+        {
+          "id": "1900",
+          "handle": "openai",
+          "displayName": "OpenAI",
+          "avatarUrl": "https://cdn.twitee.test/openai.jpg",
+          "text": "MCP is here",
+          "postedAt": "2026-08-28T00:00:00.000Z",
+          "likeCount": 12,
+          "repostCount": 3,
+          "replyCount": 2,
+          "quoteCount": 1,
+          "sourceUrl": "https://x.com/openai/status/1900",
+          "collectedAt": "2026-08-28T00:00:00.000Z",
+          "sensitiveLabel": null,
+          "isRepost": false,
+          "media": [
+            {
+              "source": "x",
+              "type": "image",
+              "url": "https://cdn.twitee.test/mcp.jpg",
+              "thumbnailUrl": "https://cdn.twitee.test/mcp-thumb.jpg",
+              "altText": "MCP image",
+              "width": 1200,
+              "height": 675
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "error": null,
+  "meta": {
+    "requestId": "request-1",
+    "generatedAt": "2026-08-28T00:00:01.000Z"
+  }
+}

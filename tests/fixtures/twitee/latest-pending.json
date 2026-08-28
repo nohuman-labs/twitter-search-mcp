@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "data": {
+    "query": "new",
+    "latest": {
+      "generation": "search:query-3:request-3:7",
+      "status": "refreshing",
+      "materialized": false,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "totalPages": 1,
+        "hasMore": false
+      },
+      "items": []
+    }
+  },
+  "error": null,
+  "meta": {
+    "requestId": "request-3",
+    "generatedAt": "2026-08-28T00:00:03.000Z"
+  }
+}

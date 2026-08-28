@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "secret upstream diagnostic"
+  },
+  "meta": {
+    "requestId": "request-4",
+    "generatedAt": "2026-08-28T00:00:04.000Z"
+  }
+}

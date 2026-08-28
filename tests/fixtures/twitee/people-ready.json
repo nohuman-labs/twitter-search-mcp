@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "data": {
+    "query": "@openai",
+    "people": {
+      "generation": "search:query-2:request-2:7",
+      "status": "ready",
+      "materialized": true,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "totalPages": 1,
+        "hasMore": false
+      },
+      "items": [
+        {
+          "handle": "openai",
+          "displayName": "OpenAI",
+          "avatarUrl": "https://cdn.twitee.test/openai.jpg",
+          "bio": "AI research and deployment",
+          "followersCount": 1000,
+          "verified": true,
+          "rank": 1,
+          "sourceUrl": "https://x.com/openai",
+          "collectedAt": "2026-08-28T00:00:00.000Z",
+          "fetchedAt": "2026-08-28T00:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "error": null,
+  "meta": {
+    "requestId": "request-2",
+    "generatedAt": "2026-08-28T00:00:02.000Z"
+  }
+}
