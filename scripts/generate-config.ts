@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../src/config/load.js";
 import type { AppConfig } from "../src/config/schema.js";
-
-const rateLimitNamespaceId = "00000000000000000000000000000000";
+import { SafeError } from "../src/domain/errors.js";
 
 type WranglerConfig = {
   readonly name: string;
@@ -29,22 +28,29 @@ export type ServerlessArtifacts = {
 
 type Rename = (from: string, to: string) => Promise<void>;
 
-export type GenerateConfigDependencies = {
+export type GenerateConfigOptions = {
   readonly rename?: Rename;
+  readonly rateLimitNamespaceId?: string;
 };
 
 export async function generateServerlessArtifacts(
   configPath: string,
   outputDir: string,
-  dependencies: GenerateConfigDependencies = {},
+  options: GenerateConfigOptions = {},
 ): Promise<ServerlessArtifacts> {
   const config = await loadConfig(configPath);
-  const artifacts = createArtifacts(config);
-  await writeArtifacts(outputDir, artifacts, dependencies.rename ?? rename);
+  const artifacts = createArtifacts(config, options.rateLimitNamespaceId);
+  await writeArtifacts(outputDir, artifacts, options.rename ?? rename);
   return artifacts;
 }
 
-function createArtifacts(config: AppConfig): ServerlessArtifacts {
+function createArtifacts(
+  config: AppConfig,
+  rateLimitNamespaceId: string | undefined,
+): ServerlessArtifacts {
+  const namespaceId = config.ratelimit.enabled
+    ? validRateLimitNamespace(rateLimitNamespaceId)
+    : undefined;
   return {
     moduleSource: `import type { AppConfig } from "../src/config/schema.js";\n\nconst config = ${JSON.stringify(config, null, 2)} satisfies AppConfig;\n\nexport default config;\n`,
     wrangler: {
@@ -54,12 +60,12 @@ function createArtifacts(config: AppConfig): ServerlessArtifacts {
       compatibility_flags: ["nodejs_compat"],
       observability: { enabled: true },
       vars: { MCP_CONFIG: JSON.stringify(config) },
-      ...(config.ratelimit.enabled
+      ...(namespaceId !== undefined
         ? {
             ratelimits: [
               {
                 name: "MCP_RATE_LIMITER",
-                namespace_id: rateLimitNamespaceId,
+                namespace_id: namespaceId,
                 simple: {
                   limit: config.ratelimit.limit,
                   period: windowSeconds(config.ratelimit.window),
@@ -70,6 +76,22 @@ function createArtifacts(config: AppConfig): ServerlessArtifacts {
         : {}),
     },
   };
+}
+
+function validRateLimitNamespace(value: string | undefined): string {
+  const namespaceId = value?.trim();
+  if (
+    namespaceId === undefined ||
+    namespaceId.length === 0 ||
+    /^0+$/.test(namespaceId) ||
+    /placeholder|replace/i.test(namespaceId)
+  ) {
+    throw new SafeError(
+      "CONFIG_INVALID",
+      "A non-placeholder Cloudflare rate-limit namespace is required",
+    );
+  }
+  return namespaceId;
 }
 
 function windowSeconds(window: AppConfig["ratelimit"]["window"]): 10 | 60 {
@@ -206,25 +228,46 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function runCli(): Promise<void> {
-  const configPath = parseConfigPath(process.argv.slice(2));
-  await generateServerlessArtifacts(configPath, ".generated");
+  const options = parseArguments(process.argv.slice(2));
+  await generateServerlessArtifacts(options.configPath, ".generated", {
+    rateLimitNamespaceId: options.rateLimitNamespaceId,
+  });
 }
 
-function parseConfigPath(arguments_: readonly string[]): string {
-  if (arguments_.length === 0) {
-    return "mcp.config.yaml";
+function parseArguments(arguments_: readonly string[]): {
+  configPath: string;
+  rateLimitNamespaceId?: string;
+} {
+  let configPath = "mcp.config.yaml";
+  let rateLimitNamespaceId: string | undefined;
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    const value = arguments_[index + 1];
+    if (value === undefined) {
+      throw new Error(
+        "Usage: generate-config [--config path] [--rate-limit-namespace-id id]",
+      );
+    }
+    if (argument === "--config") {
+      configPath = value;
+    } else if (argument === "--rate-limit-namespace-id") {
+      rateLimitNamespaceId = value;
+    } else {
+      throw new Error(
+        "Usage: generate-config [--config path] [--rate-limit-namespace-id id]",
+      );
+    }
+    index += 1;
   }
-
-  if (arguments_.length === 2 && arguments_[0] === "--config") {
-    return arguments_[1];
-  }
-
-  throw new Error("Usage: generate-config [--config path]");
+  return { configPath, rateLimitNamespaceId };
 }
 
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  await runCli();
+  await runCli().catch(() => {
+    console.error("Configuration generation failed");
+    process.exitCode = 1;
+  });
 }

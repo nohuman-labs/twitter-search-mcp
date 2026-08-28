@@ -31,7 +31,7 @@ doctor:
 	npm run doctor
 
 deploy-cloudflare: check doctor
-	npm run generate:config
+	npm run generate:config -- --rate-limit-namespace-id "$(CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID)"
 	npx wrangler deploy --config .generated/wrangler.jsonc
 
 deploy-vercel: check doctor

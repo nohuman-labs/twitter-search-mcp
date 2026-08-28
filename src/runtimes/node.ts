@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import {
   createServer,
   type IncomingMessage,
@@ -11,6 +12,7 @@ import type { AppConfig } from "../config/schema.js";
 import { authorize } from "../core/access.js";
 import { clientKey } from "../core/client-key.js";
 import {
+  addCorsHeaders,
   HEALTH_PATH,
   healthResponse,
   MCP_PATH,
@@ -40,6 +42,9 @@ export type NodeServerOptions = {
 
 const defaultHost = "127.0.0.1";
 const defaultPort = 3000;
+const maximumRequestBodyBytes = 1_048_576;
+
+class RequestBodyTooLargeError extends SafeError {}
 
 export async function createNodeServer(
   options: NodeServerOptions,
@@ -78,7 +83,9 @@ export async function createNodeServer(
       logger,
       mcpServerFactory,
       transportFactory,
-    });
+    })
+      .catch((error) => handleCallbackFailure(request, response, logger, error))
+      .catch(() => response.destroy());
   });
 
   await listen(
@@ -103,6 +110,7 @@ type RequestContext = {
 async function handleRequest(context: RequestContext): Promise<void> {
   const { request, response } = context;
   const url = requestUrl(request);
+  const originTarget = requestOriginTarget(request, url);
 
   if (request.method === "GET" && url.pathname === HEALTH_PATH) {
     await writeResponse(response, healthResponse(serverVersion));
@@ -121,7 +129,7 @@ async function handleRequest(context: RequestContext): Promise<void> {
   }
 
   if (request.method === "OPTIONS") {
-    await handlePreflight(context, url);
+    await handlePreflight(context, originTarget);
     return;
   }
 
@@ -131,7 +139,7 @@ async function handleRequest(context: RequestContext): Promise<void> {
     return;
   }
 
-  await handleMcpRequest(context, url);
+  await handleMcpRequest(context, originTarget);
 }
 
 async function handlePreflight(
@@ -139,7 +147,9 @@ async function handlePreflight(
   url: URL,
 ): Promise<void> {
   try {
-    validateOrigin(requestHeaders(request), url);
+    const headers = requestHeaders(request);
+    validateOrigin(headers, url);
+    setNodeCorsHeaders(response, headers);
   } catch (error) {
     await writeSafeError(response, error);
     logger({ method: "OPTIONS", path: MCP_PATH, status: response.statusCode });
@@ -175,6 +185,7 @@ async function handleMcpRequest(
   try {
     const headers = requestHeaders(request);
     validateOrigin(headers, url);
+    setNodeCorsHeaders(response, headers);
     await authorize(headers, config.access);
 
     if (rateLimiter !== undefined) {
@@ -190,6 +201,7 @@ async function handleMcpRequest(
       }
     }
 
+    const parsedBody = await readMcpBody(request);
     const transport = transportFactory();
     let mcpServer: ReturnType<typeof createMcpServer> | undefined;
     const teardown = once(async () => {
@@ -207,7 +219,7 @@ async function handleMcpRequest(
     try {
       mcpServer = mcpServerFactory(config, dependencies);
       await mcpServer.connect(transport);
-      await transport.handleRequest(request, response);
+      await transport.handleRequest(request, response, parsedBody);
       logger({ method: "POST", path: MCP_PATH, status: response.statusCode });
     } finally {
       request.off("aborted", abort);
@@ -227,6 +239,23 @@ async function handleMcpRequest(
   }
 }
 
+async function handleCallbackFailure(
+  request: IncomingMessage,
+  response: ServerResponse,
+  logger: Logger,
+  error: unknown,
+): Promise<void> {
+  if (!response.writableEnded && !response.destroyed) {
+    await writeSafeError(response, error);
+  }
+  logger({
+    method: request.method ?? "UNKNOWN",
+    path: "invalid",
+    status: response.statusCode,
+    ...(error instanceof SafeError ? { code: error.code } : {}),
+  });
+}
+
 function once(operation: () => Promise<void>): () => Promise<void> {
   let result: Promise<void> | undefined;
   return () => {
@@ -236,10 +265,24 @@ function once(operation: () => Promise<void>): () => Promise<void> {
 }
 
 function requestUrl(request: IncomingMessage): URL {
-  return new URL(
-    request.url ?? "/",
-    `http://${request.headers.host ?? "localhost"}`,
-  );
+  try {
+    return new URL(request.url ?? "/", "http://localhost");
+  } catch {
+    throw invalidRequest();
+  }
+}
+
+function requestOriginTarget(request: IncomingMessage, route: URL): URL {
+  const host = request.headers.host ?? "localhost";
+  try {
+    const origin = new URL(`http://${host}/`);
+    if (origin.host.toLowerCase() !== host.toLowerCase()) {
+      throw new Error("Invalid Host header");
+    }
+    return new URL(`${route.pathname}${route.search}`, origin);
+  } catch {
+    throw invalidRequest();
+  }
 }
 
 function requestHeaders(request: IncomingMessage): Headers {
@@ -278,6 +321,7 @@ async function writeSafeError(
 }
 
 function safeErrorStatus(error: SafeError | undefined): number {
+  if (error instanceof RequestBodyTooLargeError) return 413;
   switch (error?.code) {
     case "AUTH_REQUIRED":
       return 401;
@@ -288,6 +332,94 @@ function safeErrorStatus(error: SafeError | undefined): number {
     default:
       return 500;
   }
+}
+
+function invalidRequest(): SafeError {
+  return new SafeError("INVALID_INPUT", "Invalid request");
+}
+
+function setNodeCorsHeaders(
+  response: ServerResponse,
+  requestHeaders: Headers,
+): void {
+  const headers = new Headers();
+  addCorsHeaders(headers, requestHeaders);
+  for (const [name, value] of headers) {
+    response.setHeader(name, value);
+  }
+}
+
+async function readMcpBody(request: IncomingMessage): Promise<unknown> {
+  const contentLength = request.headers["content-length"];
+  if (contentLength !== undefined) {
+    if (!/^\d+$/.test(contentLength)) throw invalidRequest();
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes)) throw invalidRequest();
+    if (declaredBytes > maximumRequestBodyBytes) {
+      drainRequest(request);
+      throw requestBodyTooLarge();
+    }
+  }
+
+  const body = await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("aborted", onAborted);
+      request.off("error", onError);
+    };
+    const fail = (error: unknown, drain = false) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (drain) drainRequest(request);
+      reject(error);
+    };
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.byteLength;
+      if (bytes > maximumRequestBodyBytes) {
+        fail(requestBodyTooLarge(), true);
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(Buffer.concat(chunks, bytes));
+    };
+    const onAborted = () => fail(invalidRequest());
+    const onError = () => fail(invalidRequest());
+
+    request.on("data", onData);
+    request.once("end", onEnd);
+    request.once("aborted", onAborted);
+    request.once("error", onError);
+  });
+
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    throw new SafeError("INVALID_INPUT", "Invalid request body");
+  }
+}
+
+function drainRequest(request: IncomingMessage): void {
+  request.once("error", () => undefined);
+  request.resume();
+}
+
+function requestBodyTooLarge(): RequestBodyTooLargeError {
+  return new RequestBodyTooLargeError(
+    "INVALID_INPUT",
+    "Request body is too large",
+  );
 }
 
 async function writeResponse(
@@ -363,5 +495,8 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  void runCli();
+  void runCli().catch(() => {
+    console.error("Configuration is invalid");
+    process.exitCode = 1;
+  });
 }

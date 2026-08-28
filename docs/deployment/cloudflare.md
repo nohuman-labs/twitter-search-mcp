@@ -6,6 +6,12 @@ Cloudflare Workers is a Tier 1 deployment path. From a private configured checko
 make deploy-cloudflare
 ```
 
+When `ratelimit.enabled` is `true`, supply a unique namespace ID explicitly:
+
+```sh
+make deploy-cloudflare CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID=1001
+```
+
 This runs `make check`, `make doctor`, `npm run generate:config`, and then:
 
 ```sh
@@ -20,7 +26,7 @@ The generated `MCP_CONFIG` value and `.generated/config.ts` contain the complete
 
 ## Rate limiting
 
-When `ratelimit.enabled` is true, generation adds an `MCP_RATE_LIMITER` Workers Rate Limiting binding. Its namespace ID is intentionally a placeholder in generated output. Replace that placeholder with the namespace ID for the enabled rate limiter before deployment. Do not enable Cloudflare rate limiting with the placeholder unchanged.
+When `ratelimit.enabled` is true, generation adds an `MCP_RATE_LIMITER` Workers Rate Limiting binding using `CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID`. Generation refuses a missing, empty, or placeholder namespace, so deployment stops before Wrangler runs. Generated output remains read-only: change the YAML or Make variable and regenerate instead of editing `.generated/wrangler.jsonc`.
 
 The Workers binding is edge-location-local, permissive, and eventually consistent. It is an abuse guard, not global quota or accounting.
 

@@ -1,5 +1,6 @@
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import type { AddressInfo, Server } from "node:net";
+import { type AddressInfo, connect, type Server } from "node:net";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -102,6 +103,234 @@ it("answers matching-origin preflight before bearer authentication and rate limi
       "POST, OPTIONS",
     );
     expect(response.headers.get("access-control-allow-origin")).toBe(base);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("reflects an accepted POST origin on success and safe errors", async () => {
+  const transport = {
+    handleRequest: vi.fn(async (_request, response: ServerResponse) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    }),
+    close: vi.fn(async () => {}),
+  };
+  const mcpServer = {
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory: () => mcpServer,
+    transportFactory: () => transport,
+  });
+  const base = serverAddress(server);
+
+  try {
+    const success = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: "{}",
+    });
+    expect(success.status).toBe(200);
+    expect(success.headers.get("access-control-allow-origin")).toBe(base);
+    expect(success.headers.get("vary")).toMatch(/(?:^|,\s*)Origin(?:,|$)/);
+
+    const crossOrigin = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://other.test",
+      },
+      body: "{}",
+    });
+    expect(crossOrigin.status).toBe(400);
+    expect(crossOrigin.headers.get("access-control-allow-origin")).toBeNull();
+    expect(transport.handleRequest).toHaveBeenCalledTimes(1);
+
+    const bearerServer = await createNodeServer({
+      config: testConfig({ mode: "bearer", token: crypto.randomUUID() }),
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const bearerBase = serverAddress(bearerServer);
+    try {
+      const denied = await fetch(`${bearerBase}/mcp`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: bearerBase,
+        },
+        body: "{}",
+      });
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get("access-control-allow-origin")).toBe(
+        bearerBase,
+      );
+      expect(denied.headers.get("vary")).toMatch(/(?:^|,\s*)Origin(?:,|$)/);
+    } finally {
+      await closeServer(bearerServer);
+    }
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("rejects an oversized MCP body before transport buffering", async () => {
+  const transport = {
+    handleRequest: vi.fn(async (_request, response: ServerResponse) => {
+      response.end("{}");
+    }),
+    close: vi.fn(async () => {}),
+  };
+  const mcpServerFactory = vi.fn(() => ({
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  }));
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory,
+    transportFactory: () => transport,
+  });
+
+  try {
+    const response = await fetch(`${serverAddress(server)}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "x".repeat(1_048_576) }),
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: "INVALID_INPUT",
+      message: "Request body is too large",
+    });
+    expect(mcpServerFactory).not.toHaveBeenCalled();
+    expect(transport.handleRequest).not.toHaveBeenCalled();
+    expect((await fetch(`${serverAddress(server)}/healthz`)).status).toBe(200);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("stops buffering an oversized chunked MCP body", async () => {
+  const mcpServerFactory = vi.fn(() => ({
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  }));
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory,
+  });
+
+  try {
+    const { port } = server.address() as AddressInfo;
+    const body = "x".repeat(1_048_577);
+    const response = await rawHttp(
+      port,
+      [
+        "POST /mcp HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Transfer-Encoding: chunked",
+        "Connection: close",
+        "",
+        `${body.length.toString(16)}\r\n${body}\r\n0`,
+        "",
+        "",
+      ].join("\r\n"),
+    );
+
+    expect(response).toMatch(/^HTTP\/1\.1 413 /);
+    expect(response).toContain('"message":"Request body is too large"');
+    expect(mcpServerFactory).not.toHaveBeenCalled();
+    expect((await fetch(`${serverAddress(server)}/healthz`)).status).toBe(200);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("returns a sanitized 400 for a malformed Host and keeps the process alive", async () => {
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "tests/helpers/node-host-process.ts"],
+    { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let diagnostics = "";
+  child.stderr.on("data", (chunk) => (diagnostics += String(chunk)));
+
+  try {
+    const port = await childPort(child);
+    const response = await rawHttp(
+      port,
+      "GET /healthz HTTP/1.1\r\nHost: [\r\nConnection: close\r\n\r\n",
+    );
+
+    expect(response).toMatch(/^HTTP\/1\.1 400 /);
+    expect(response).toContain('"code":"INVALID_INPUT"');
+    expect(response).not.toContain("[");
+    expect(child.exitCode).toBeNull();
+    expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
+    expect(diagnostics).toBe("");
+  } finally {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("close", resolve));
+    }
+  }
+});
+
+it("propagates Node request cancellation to an in-flight provider fetch", async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    dependencies: {
+      fetch: async (_input, init) => {
+        upstreamSignal = init?.signal ?? undefined;
+        markStarted?.();
+        return await new Promise<Response>((_resolve, reject) => {
+          const fallback = setTimeout(
+            () => reject(new Error("raw-node-provider-marker")),
+            250,
+          );
+          upstreamSignal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(fallback);
+              reject(new Error("raw-node-abort-marker"));
+            },
+            { once: true },
+          );
+        });
+      },
+    },
+  });
+  const controller = new AbortController();
+  const pending = fetch(`${serverAddress(server)}/mcp`, {
+    method: "POST",
+    headers: mcpHeaders(),
+    body: JSON.stringify(toolCall("search_posts", { query: "mcp" })),
+    signal: controller.signal,
+  }).catch(() => undefined);
+
+  try {
+    await started;
+    controller.abort();
+    await pending;
+    await vi.waitFor(() => expect(upstreamSignal?.aborted).toBe(true));
   } finally {
     await closeServer(server);
   }
@@ -349,3 +578,48 @@ it("requires bearer credentials for MCP without logging the configured token", a
     output.mockRestore();
   }
 });
+
+function childPort(child: ReturnType<typeof spawn>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    child.stdout?.on("data", (chunk) => {
+      output += String(chunk);
+      const line = output.split("\n")[0];
+      if (/^\d+$/.test(line)) {
+        resolve(Number(line));
+      }
+    });
+    child.once("exit", (code) =>
+      reject(new Error(`Node probe exited before readiness (${code})`)),
+    );
+  });
+}
+
+function rawHttp(port: number, request: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1");
+    let response = "";
+    socket.setEncoding("utf8");
+    socket.setTimeout(2_000, () => socket.destroy(new Error("socket timeout")));
+    socket.on("connect", () => socket.end(request));
+    socket.on("data", (chunk) => (response += chunk));
+    socket.on("end", () => resolve(response));
+    socket.on("error", reject);
+  });
+}
+
+function mcpHeaders(): Record<string, string> {
+  return {
+    accept: "application/json, text/event-stream",
+    "content-type": "application/json",
+  };
+}
+
+function toolCall(name: string, arguments_: Record<string, unknown>) {
+  return {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name, arguments: arguments_ },
+  };
+}

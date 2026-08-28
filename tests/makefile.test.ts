@@ -18,7 +18,12 @@ it("preserves private configuration during setup", async () => {
 });
 
 it("runs checks and diagnostics before platform deployment commands", async () => {
-  const cloudflare = await runMake(["-n", "deploy-cloudflare"]);
+  const namespaceId = "1".repeat(32);
+  const cloudflare = await runMake([
+    "-n",
+    "deploy-cloudflare",
+    `CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID=${namespaceId}`,
+  ]);
   const vercel = await runMake(["-n", "deploy-vercel"]);
 
   for (const result of [cloudflare, vercel]) {
@@ -28,6 +33,9 @@ it("runs checks and diagnostics before platform deployment commands", async () =
   }
   expect(cloudflare.output).toContain(
     "npx wrangler deploy --config .generated/wrangler.jsonc",
+  );
+  expect(cloudflare.output).toContain(
+    `--rate-limit-namespace-id "${namespaceId}"`,
   );
   expect(vercel.output).toContain("npx vercel --prod");
 });

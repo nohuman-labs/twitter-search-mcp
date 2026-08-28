@@ -66,6 +66,16 @@ it("keeps contributor commands aligned with the Makefile", async () => {
   }
 });
 
+it("documents an explicit Cloudflare rate-limit namespace without generated edits", async () => {
+  const cloudflare = await read("docs/deployment/cloudflare.md");
+  const readme = await read("README.md");
+
+  expect(cloudflare).toContain("CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID");
+  expect(cloudflare).toMatch(/refuses.*(missing|placeholder).*namespace/is);
+  expect(cloudflare).not.toMatch(/replace.*placeholder/is);
+  expect(readme).toContain("CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID");
+});
+
 it("ships every linked OSS document", async () => {
   for (const path of [
     "README.md",

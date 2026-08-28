@@ -9,7 +9,7 @@ import type {
   SearchPostsInput,
   SearchPostsResult,
 } from "../domain/types.js";
-import type { SearchProvider } from "./provider.js";
+import { type SearchProvider, withAbortDeadline } from "./provider.js";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -20,6 +20,7 @@ type XProviderOptions = {
   readonly baseUrl: string;
   readonly token: string;
   readonly fetch: FetchLike;
+  readonly requestTimeoutMs?: number;
 };
 
 const userSchema = z.object({
@@ -73,7 +74,56 @@ const recentSearchSchema = z.object({
 
 const userLookupSchema = z.object({ data: userSchema });
 
-const continuationSchema = z.object({ next_token: z.string().min(1) }).strict();
+const bufferedProfileSchema = z
+  .object({
+    id: z.string(),
+    handle: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    profile_image_url: z.string().url().nullable(),
+    verified: z.boolean(),
+    followers_count: z.number().nonnegative(),
+    following_count: z.number().nonnegative(),
+  })
+  .strict();
+
+const bufferedPostSchema = z
+  .object({
+    id: z.string(),
+    text: z.string(),
+    created_at: z.string().datetime(),
+    author: bufferedProfileSchema,
+    metrics: z
+      .object({
+        reply_count: z.number().nonnegative(),
+        repost_count: z.number().nonnegative(),
+        like_count: z.number().nonnegative(),
+        quote_count: z.number().nonnegative(),
+      })
+      .strict(),
+    media: z.array(
+      z
+        .object({
+          type: z.string(),
+          url: z.string().url(),
+          preview_url: z.string().url().nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+const continuationSchema = z
+  .object({
+    next_token: z.string().min(1).optional(),
+    buffer: z.array(bufferedPostSchema).optional(),
+  })
+  .strict()
+  .refine(
+    (continuation) =>
+      continuation.next_token !== undefined ||
+      (continuation.buffer?.length ?? 0) > 0,
+  );
 
 const postFields = "created_at,public_metrics,author_id,attachments";
 const userFields =
@@ -81,15 +131,29 @@ const userFields =
 const mediaFields = "media_key,type,url,preview_image_url";
 const minimumXResults = 10;
 const maxResults = 50;
+const defaultRequestTimeoutMilliseconds = 8_000;
 
 export function createXProvider(options: XProviderOptions): SearchProvider {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
+  const requestTimeoutMilliseconds =
+    options.requestTimeoutMs ?? defaultRequestTimeoutMilliseconds;
+  if (
+    !Number.isSafeInteger(requestTimeoutMilliseconds) ||
+    requestTimeoutMilliseconds < 1
+  ) {
+    throw new SafeError("CONFIG_INVALID", "X request timeout must be positive");
+  }
 
-  const request = async (path: string, params: URLSearchParams) => {
+  const request = async (
+    path: string,
+    params: URLSearchParams,
+    signal: AbortSignal,
+  ) => {
     let response: Response;
     try {
       response = await options.fetch(`${baseUrl}${path}?${params.toString()}`, {
         headers: { authorization: `Bearer ${options.token}` },
+        signal,
       });
     } catch (error) {
       throw unavailable(error);
@@ -114,102 +178,113 @@ export function createXProvider(options: XProviderOptions): SearchProvider {
       lookupProfile: true,
       searchProfiles: false,
     },
-    searchPosts: async (
-      input: SearchPostsInput,
-    ): Promise<SearchPostsResult> => {
-      const nextToken = continuationFor(input.cursor, input.query);
-      const limit = Math.min(input.limit, maxResults);
-      const upstreamLimit = Math.max(minimumXResults, limit);
-      const params = new URLSearchParams({
-        query: input.query,
-        max_results: String(upstreamLimit),
-        expansions: "author_id,attachments.media_keys",
-        "tweet.fields": postFields,
-        "user.fields": userFields,
-        "media.fields": mediaFields,
-        ...(nextToken === undefined ? {} : { next_token: nextToken }),
-      });
-      const response = await request("/2/tweets/search/recent", params);
-      const parsed = recentSearchSchema.safeParse(await readJson(response));
-      if (!parsed.success) {
-        throw unavailable();
-      }
-
-      const users = new Map(
-        (parsed.data.includes?.users ?? []).map((user) => [user.id, user]),
-      );
-      const media = new Map(
-        (parsed.data.includes?.media ?? []).map((item) => [
-          item.media_key,
-          item,
-        ]),
-      );
-      const items = (parsed.data.data ?? [])
-        .slice(0, limit)
-        .map((post) => mapPost(post, users, media));
-      const next = parsed.data.meta.next_token;
-
-      return {
-        provider: "x",
-        status: "ready",
-        items,
-        pagination: {
-          has_more: next !== undefined,
-          next_cursor:
-            next === undefined
-              ? null
-              : encodeCursor({
-                  v: 1,
-                  tool: "search_posts",
-                  provider: "x",
-                  query: input.query,
-                  continuation: { next_token: next },
-                }),
-        },
-        metadata: {
-          ...(requestId(response.headers) === undefined
+    searchPosts: async (input: SearchPostsInput): Promise<SearchPostsResult> =>
+      bounded(input.signal, async (signal) => {
+        const continuation = continuationFor(input.cursor, input.query);
+        const limit = Math.min(input.limit, maxResults);
+        if (continuation.buffer.length > 0) {
+          return searchResult(
+            input.query,
+            limit,
+            continuation.buffer,
+            continuation.nextToken,
+          );
+        }
+        const upstreamLimit = Math.max(minimumXResults, limit);
+        const params = new URLSearchParams({
+          query: input.query,
+          max_results: String(upstreamLimit),
+          expansions: "author_id,attachments.media_keys",
+          "tweet.fields": postFields,
+          "user.fields": userFields,
+          "media.fields": mediaFields,
+          ...(continuation.nextToken === undefined
             ? {}
-            : { request_id: requestId(response.headers) }),
-          generated_at: new Date().toISOString(),
-        },
-      };
-    },
-    lookupProfile: async (
-      input: LookupProfileInput,
-    ): Promise<ProfileResult> => {
-      const username = exactHandle(input.handle);
-      const params = new URLSearchParams({ "user.fields": userFields });
-      const response = await request(
-        `/2/users/by/username/${encodeURIComponent(username)}`,
-        params,
-      );
-      const parsed = userLookupSchema.safeParse(await readJson(response));
-      if (!parsed.success) {
-        throw unavailable();
-      }
+            : { next_token: continuation.nextToken }),
+        });
+        const response = await request(
+          "/2/tweets/search/recent",
+          params,
+          signal,
+        );
+        const parsed = recentSearchSchema.safeParse(await readJson(response));
+        if (!parsed.success) {
+          throw unavailable();
+        }
 
-      return {
-        provider: "x",
-        status: "ready",
-        items: [mapProfile(parsed.data.data)],
-        pagination: { next_cursor: null, has_more: false },
-        metadata: {
-          ...(requestId(response.headers) === undefined
-            ? {}
-            : { request_id: requestId(response.headers) }),
-          generated_at: new Date().toISOString(),
-        },
-      };
-    },
+        const users = new Map(
+          (parsed.data.includes?.users ?? []).map((user) => [user.id, user]),
+        );
+        const media = new Map(
+          (parsed.data.includes?.media ?? []).map((item) => [
+            item.media_key,
+            item,
+          ]),
+        );
+        const available = (parsed.data.data ?? [])
+          .slice(0, upstreamLimit)
+          .map((post) => mapPost(post, users, media));
+
+        return searchResult(
+          input.query,
+          limit,
+          available,
+          parsed.data.meta.next_token,
+          response.headers,
+        );
+      }),
+    lookupProfile: async (input: LookupProfileInput): Promise<ProfileResult> =>
+      bounded(input.signal, async (signal) => {
+        const username = exactHandle(input.handle);
+        const params = new URLSearchParams({ "user.fields": userFields });
+        const response = await request(
+          `/2/users/by/username/${encodeURIComponent(username)}`,
+          params,
+          signal,
+        );
+        const parsed = userLookupSchema.safeParse(await readJson(response));
+        if (!parsed.success) {
+          throw unavailable();
+        }
+
+        return {
+          provider: "x",
+          status: "ready",
+          items: [mapProfile(parsed.data.data)],
+          pagination: { next_cursor: null, has_more: false },
+          metadata: {
+            ...(requestId(response.headers) === undefined
+              ? {}
+              : { request_id: requestId(response.headers) }),
+            generated_at: new Date().toISOString(),
+          },
+        };
+      }),
   };
+
+  async function bounded<T>(
+    signal: AbortSignal | undefined,
+    operation: (requestSignal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await withAbortDeadline(
+        signal,
+        requestTimeoutMilliseconds,
+        operation,
+      );
+    } catch (error) {
+      if (error instanceof SafeError) throw error;
+      throw unavailable(error);
+    }
+  }
 }
 
 function continuationFor(
   cursor: string | null,
   query: string,
-): string | undefined {
+): { nextToken?: string; buffer: Post[] } {
   if (cursor === null) {
-    return undefined;
+    return { buffer: [] };
   }
   const continuation = continuationSchema.safeParse(
     decodeCursor(cursor, { tool: "search_posts", provider: "x", query }),
@@ -217,7 +292,48 @@ function continuationFor(
   if (!continuation.success) {
     throw new SafeError("INVALID_INPUT", "Invalid cursor");
   }
-  return continuation.data.next_token;
+  return {
+    nextToken: continuation.data.next_token,
+    buffer: continuation.data.buffer ?? [],
+  };
+}
+
+function searchResult(
+  query: string,
+  limit: number,
+  available: Post[],
+  nextToken: string | undefined,
+  headers?: Headers,
+): SearchPostsResult {
+  const items = available.slice(0, limit);
+  const buffer = available.slice(limit);
+  const hasMore = buffer.length > 0 || nextToken !== undefined;
+  return {
+    provider: "x",
+    status: "ready",
+    items,
+    pagination: {
+      has_more: hasMore,
+      next_cursor: hasMore
+        ? encodeCursor({
+            v: 1,
+            tool: "search_posts",
+            provider: "x",
+            query,
+            continuation: {
+              ...(nextToken === undefined ? {} : { next_token: nextToken }),
+              ...(buffer.length === 0 ? {} : { buffer }),
+            },
+          })
+        : null,
+    },
+    metadata: {
+      ...(headers === undefined || requestId(headers) === undefined
+        ? {}
+        : { request_id: requestId(headers) }),
+      generated_at: new Date().toISOString(),
+    },
+  };
 }
 
 function mapProfile(user: z.infer<typeof userSchema>): Profile {

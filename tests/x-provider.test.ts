@@ -67,6 +67,107 @@ it("uses X's legal minimum page size while honoring a smaller result limit", asy
   expect(result.items.length).toBeLessThanOrEqual(3);
 });
 
+it("buffers the unused part of an X page without gaps or duplicates", async () => {
+  const payload = (await fixture("recent-search.json")) as {
+    data: Array<Record<string, unknown>>;
+    meta: { next_token?: string };
+  };
+  const firstPage = structuredClone(payload);
+  firstPage.data = Array.from({ length: 10 }, (_, index) => ({
+    ...payload.data[0],
+    id: String(index),
+  }));
+  firstPage.meta.next_token = "page-2";
+  const secondPage = structuredClone(payload);
+  secondPage.data = Array.from({ length: 10 }, (_, index) => ({
+    ...payload.data[0],
+    id: String(index + 10),
+  }));
+  secondPage.meta = {};
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify(firstPage)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(secondPage)));
+  const provider = createXProvider({ ...options(), fetch });
+
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const result = await provider.searchPosts({
+      query: "mcp",
+      limit: 3,
+      cursor,
+    });
+    seen.push(...result.items.map((item) => item.id));
+    cursor = result.pagination.next_cursor;
+  } while (cursor !== null);
+
+  expect(seen).toEqual(Array.from({ length: 20 }, (_, index) => String(index)));
+  expect(new Set(seen).size).toBe(seen.length);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  const secondUrl = new URL(fetch.mock.calls[1]?.[0] as string);
+  expect(secondUrl.searchParams.get("next_token")).toBe("page-2");
+});
+
+it("times out a hanging X request and exposes only a safe error", async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  const provider = createXProvider({
+    ...options(),
+    requestTimeoutMs: 10,
+    fetch: async (_input, init) => {
+      upstreamSignal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => {
+        const fallback = setTimeout(
+          () => reject(new Error("raw-x-timeout-marker")),
+          150,
+        );
+        upstreamSignal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(fallback);
+            reject(new Error("raw-x-abort-marker"));
+          },
+          { once: true },
+        );
+      });
+    },
+  });
+  const startedAt = Date.now();
+
+  const error = await provider
+    .searchPosts({ query: "mcp", limit: 20, cursor: null })
+    .catch((caught: unknown) => caught);
+
+  expect(Date.now() - startedAt).toBeLessThan(100);
+  expect(upstreamSignal?.aborted).toBe(true);
+  expect(error).toMatchObject({
+    code: "UPSTREAM_UNAVAILABLE",
+    message: "X is temporarily unavailable",
+  });
+  expect(JSON.stringify(error.toPublic())).not.toContain("raw-x");
+});
+
+it("fails promptly when the caller signal is already aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const provider = createXProvider({
+    ...options(),
+    requestTimeoutMs: 250,
+    fetch: async () => await new Promise<Response>(() => {}),
+  });
+  const startedAt = Date.now();
+
+  await expect(
+    provider.searchPosts({
+      query: "mcp",
+      limit: 20,
+      cursor: null,
+      signal: controller.signal,
+    }),
+  ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+  expect(Date.now() - startedAt).toBeLessThan(100);
+});
+
 it("normalizes posts, caps output, and wraps the X continuation", async () => {
   const payload = (await fixture("recent-search.json")) as {
     data: unknown[];

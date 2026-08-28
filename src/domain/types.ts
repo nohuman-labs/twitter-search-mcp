@@ -47,16 +47,19 @@ export type SearchPostsInput = {
   query: string;
   limit: number;
   cursor: string | null;
+  signal?: AbortSignal;
 };
 
 export type LookupProfileInput = {
   handle: string;
+  signal?: AbortSignal;
 };
 
 export type SearchProfilesInput = {
   query: string;
   limit: number;
   cursor: string | null;
+  signal?: AbortSignal;
 };
 
 export type SearchPostsResult = SearchResult<Post>;

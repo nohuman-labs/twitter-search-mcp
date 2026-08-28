@@ -105,6 +105,8 @@ Cloudflare Workers and Node/Docker are Tier 1 paths. Kubernetes and Vercel are T
 
 ```sh
 make deploy-cloudflare
+# With Cloudflare rate limiting enabled:
+make deploy-cloudflare CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID=1001
 make docker-build
 make docker-run
 make deploy-k8s KUBE_CONTEXT=<context>
@@ -124,7 +126,7 @@ Rate limiting is an abuse/burst guard, not quota or global accounting.
 | Kubernetes | per replica |
 | Vercel | per instance |
 
-Enable it with a `10s` or `1m` window in `mcp.config.yaml`. Cloudflare requires the generated `MCP_RATE_LIMITER` binding, and its generated namespace placeholder must be replaced before enabling that binding.
+Enable it with a `10s` or `1m` window in `mcp.config.yaml`. Cloudflare requires the generated `MCP_RATE_LIMITER` binding and an explicit `CLOUDFLARE_RATE_LIMIT_NAMESPACE_ID`; generation refuses missing or placeholder namespaces when rate limiting is enabled.
 
 ## Token handling
 

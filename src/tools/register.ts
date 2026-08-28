@@ -115,8 +115,14 @@ export function registerSearchTools(
         outputSchema: searchPostsOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input) =>
-        callTool(() => searchPosts(context, input as SearchPostsInput)),
+      async (input, requestContext) =>
+        callTool(() =>
+          searchPosts(
+            context,
+            input as SearchPostsInput,
+            requestContext?.mcpReq.signal,
+          ),
+        ),
     );
   }
 
@@ -130,8 +136,14 @@ export function registerSearchTools(
         outputSchema: lookupProfileOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input) =>
-        callTool(() => lookupProfile(context, input as LookupProfileInput)),
+      async (input, requestContext) =>
+        callTool(() =>
+          lookupProfile(
+            context,
+            input as LookupProfileInput,
+            requestContext?.mcpReq.signal,
+          ),
+        ),
     );
   }
 
@@ -145,8 +157,14 @@ export function registerSearchTools(
         outputSchema: searchProfilesOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input) =>
-        callTool(() => searchProfiles(context, input as SearchProfilesInput)),
+      async (input, requestContext) =>
+        callTool(() =>
+          searchProfiles(
+            context,
+            input as SearchProfilesInput,
+            requestContext?.mcpReq.signal,
+          ),
+        ),
     );
   }
 }
@@ -161,26 +179,30 @@ function supports(
 async function searchPosts(
   context: SearchToolsContext,
   input: SearchPostsInput,
+  signal?: AbortSignal,
 ): Promise<SearchPostsResult> {
   const provider = context.registry.resolve("search_posts", input.provider);
   return provider.searchPosts({
     query: input.query,
     limit: input.limit,
     cursor: input.cursor ?? null,
+    signal,
   });
 }
 
 async function lookupProfile(
   context: SearchToolsContext,
   input: LookupProfileInput,
+  signal?: AbortSignal,
 ): Promise<ProfileResult> {
   const provider = context.registry.resolve("lookup_profile", input.provider);
-  return provider.lookupProfile({ handle: input.handle });
+  return provider.lookupProfile({ handle: input.handle, signal });
 }
 
 async function searchProfiles(
   context: SearchToolsContext,
   input: SearchProfilesInput,
+  signal?: AbortSignal,
 ): Promise<SearchProfilesResult> {
   const provider = context.registry.resolve("search_profiles", input.provider);
   if (provider.searchProfiles === undefined) {
@@ -193,6 +215,7 @@ async function searchProfiles(
     query: input.query,
     limit: input.limit,
     cursor: input.cursor ?? null,
+    signal,
   });
 }
 

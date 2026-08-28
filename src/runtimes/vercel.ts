@@ -2,7 +2,7 @@ import { createMcpHandler } from "mcp-handler";
 import type { AppConfig } from "../config/schema.js";
 import { authorize } from "../core/access.js";
 import { clientKey } from "../core/client-key.js";
-import { MCP_PATH, validateOrigin } from "../core/http.js";
+import { MCP_PATH, validateOrigin, withCorsHeaders } from "../core/http.js";
 import { createLogger, type Logger } from "../core/logging.js";
 import { MemoryRateLimiter, type RateLimiter } from "../core/ratelimit.js";
 import {
@@ -62,15 +62,20 @@ export function createVercelHandler(
       });
     }
 
+    let originValidated = false;
     try {
       validateOrigin(request.headers, request.url);
+      originValidated = true;
       await authorize(request.headers, options.config.access);
       await enforceRateLimit(request, options.config, rateLimiter);
       const response = await mcpHandler(request);
       logger({ method: "POST", path: MCP_PATH, status: response.status });
-      return response;
+      return withCorsHeaders(response, request.headers);
     } catch (error) {
-      const response = safeErrorResponse(error);
+      const safeResponse = safeErrorResponse(error);
+      const response = originValidated
+        ? withCorsHeaders(safeResponse, request.headers)
+        : safeResponse;
       logger({
         method: "POST",
         path: MCP_PATH,

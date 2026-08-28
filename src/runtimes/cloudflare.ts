@@ -9,9 +9,14 @@ import {
   READY_PATH,
   readyResponse,
   validateOrigin,
+  withCorsHeaders,
 } from "../core/http.js";
 import type { RateLimiter } from "../core/ratelimit.js";
-import { createMcpServer, serverVersion } from "../core/server.js";
+import {
+  createMcpServer,
+  type McpServerDependencies,
+  serverVersion,
+} from "../core/server.js";
 import { SafeError } from "../domain/errors.js";
 
 export type CloudflareEnv = {
@@ -26,6 +31,7 @@ type McpHandler = {
 export type CloudflareWorkerOptions = {
   readonly config: AppConfig;
   readonly mcpHandler?: McpHandler;
+  readonly dependencies?: McpServerDependencies;
 };
 
 export type CloudflareWorker = {
@@ -38,7 +44,11 @@ export function createCloudflareWorker(
   const mcpHandler =
     options.mcpHandler ??
     createMcpHandler(
-      () => createMcpServer(options.config, { fetch: globalThis.fetch }),
+      () =>
+        createMcpServer(
+          options.config,
+          options.dependencies ?? { fetch: globalThis.fetch },
+        ),
       {
         route: MCP_PATH,
         responseMode: "json",
@@ -81,7 +91,10 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === READY_PATH) {
-    return readyResponse(serverVersion, true);
+    return readyResponse(
+      serverVersion,
+      !config.ratelimit.enabled || env.MCP_RATE_LIMITER !== undefined,
+    );
   }
 
   if (url.pathname !== MCP_PATH) {
@@ -99,13 +112,18 @@ async function handleRequest(
     });
   }
 
+  let originValidated = false;
   try {
     validateOrigin(request.headers, url);
+    originValidated = true;
     await authorize(request.headers, config.access);
     await enforceRateLimit(request, env, config);
-    return await mcpHandler.fetch(request);
+    return withCorsHeaders(await mcpHandler.fetch(request), request.headers);
   } catch (error) {
-    return safeErrorResponse(error);
+    const response = safeErrorResponse(error);
+    return originValidated
+      ? withCorsHeaders(response, request.headers)
+      : response;
   }
 }
 
@@ -135,8 +153,11 @@ async function enforceRateLimit(
   env: CloudflareEnv,
   config: AppConfig,
 ): Promise<void> {
-  if (!config.ratelimit.enabled || env.MCP_RATE_LIMITER === undefined) {
+  if (!config.ratelimit.enabled) {
     return;
+  }
+  if (env.MCP_RATE_LIMITER === undefined) {
+    throw new SafeError("CONFIG_INVALID", "Rate limiting is unavailable");
   }
 
   const limiter = new CloudflareRateLimiter(

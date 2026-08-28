@@ -16,7 +16,10 @@ type RegisteredTool = {
     readonly annotations?: unknown;
     readonly description?: string;
   };
-  readonly handler: (input: Record<string, unknown>) => Promise<unknown>;
+  readonly handler: (
+    input: Record<string, unknown>,
+    context?: { readonly mcpReq: { readonly signal: AbortSignal } },
+  ) => Promise<unknown>;
 };
 
 const config = (defaultProvider: "twitee" | "x"): AppConfig => ({
@@ -123,6 +126,24 @@ it("returns structured content and an equal JSON fallback", async () => {
     status: "ready",
   });
   expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
+});
+
+it("passes the MCP request abort signal to the selected provider", async () => {
+  const searchPosts = vi.fn(async () => result);
+  const call = tool(
+    captureTools(context("twitee", [provider("twitee", searchPosts)])),
+    "search_posts",
+  );
+  const controller = new AbortController();
+
+  await call.handler(
+    { query: "mcp", limit: 20 },
+    { mcpReq: { signal: controller.signal } },
+  );
+
+  expect(searchPosts).toHaveBeenCalledWith(
+    expect.objectContaining({ signal: controller.signal }),
+  );
 });
 
 it("uses the common default and maximum search limit", () => {

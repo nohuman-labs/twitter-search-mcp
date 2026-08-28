@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -13,6 +14,10 @@ type PackageExports = Record<
 
 type Workflow = {
   readonly on: { readonly push: { readonly tags: readonly string[] } };
+  readonly concurrency?: {
+    readonly group?: string;
+    readonly "cancel-in-progress"?: boolean;
+  };
   readonly permissions: Record<string, string>;
   readonly jobs: Record<string, WorkflowJob>;
 };
@@ -27,7 +32,12 @@ type WorkflowJob = {
   };
 };
 
-type WorkflowStep = { readonly name?: string; readonly run?: string };
+type WorkflowStep = {
+  readonly id?: string;
+  readonly if?: string;
+  readonly name?: string;
+  readonly run?: string;
+};
 
 describe("published package", () => {
   it("publishes only built runtime files and the required public documents", async () => {
@@ -73,6 +83,34 @@ describe("published package", () => {
     expect(pkg.dependencies["@modelcontextprotocol/sdk"]).toBeUndefined();
   });
 
+  it("keeps Node 20 metadata aligned with the locked production graph", async () => {
+    const pkg = JSON.parse(await readFile("package.json", "utf8"));
+    const lock = JSON.parse(await readFile("package-lock.json", "utf8")) as {
+      packages: Record<
+        string,
+        { dev?: boolean; engines?: { node?: string }; version?: string }
+      >;
+    };
+    const require = createRequire(import.meta.url);
+    const { satisfies } = require("semver") as {
+      satisfies(version: string, range: string): boolean;
+    };
+    const incompatible = Object.entries(lock.packages)
+      .filter(
+        ([path, metadata]) =>
+          path !== "" &&
+          metadata.dev !== true &&
+          metadata.engines?.node !== undefined &&
+          !satisfies("20.0.0", metadata.engines.node),
+      )
+      .map(([path, metadata]) => `${path}@${metadata.version}`);
+
+    expect(pkg.engines.node).toBe(">=20");
+    expect(pkg.dependencies.agents).toBeUndefined();
+    expect(pkg.devDependencies.agents).toBe("0.22.0");
+    expect(incompatible).toEqual([]);
+  });
+
   it("keeps pull-request verification credential-free and avoids repeated image builds", async () => {
     const workflow = await workflowAt(".github/workflows/ci.yml");
     const testJob = workflow.jobs.test;
@@ -105,6 +143,11 @@ describe("published package", () => {
 
     expect(workflow.on.push.tags).toEqual(["v*"]);
     expect(workflow.permissions).toEqual({ contents: "read" });
+    const tagConcurrencyGroup = ["release-", "$", "{{ github.ref }}"].join("");
+    expect(workflow.concurrency).toEqual({
+      group: tagConcurrencyGroup,
+      "cancel-in-progress": false,
+    });
     expect(publishJob.environment).toBe("release");
     expect(publishJob.permissions).toEqual({
       contents: "write",
@@ -123,8 +166,7 @@ describe("published package", () => {
       "npm pack --dry-run --ignore-scripts --json",
     );
     const checkIndex = steps.findIndex(
-      (step) =>
-        step.name === "Check whether this release version already exists",
+      (step) => step.name === "Resolve npm publication state",
     );
     const publishIndex = commands.findIndex((command) =>
       command.includes(
@@ -138,11 +180,49 @@ describe("published package", () => {
     expect(packIndex).toBeGreaterThan(buildIndex);
     expect(checkIndex).toBeGreaterThan(packIndex);
     expect(publishIndex).toBeGreaterThan(checkIndex);
+    expect(versionCheck).toContain('package_name="$(node -p');
+    expect(versionCheck).toContain('package_version="$(node -p');
     expect(versionCheck).toContain(
-      'npm view "$package_name@$package_version" version --json',
+      'sh scripts/release-state.sh npm "$package_name" "$package_version"',
     );
-    expect(versionCheck).toContain('if [ "$status" -eq 0 ]; then');
-    expect(versionCheck).toContain("grep -q 'E404'");
+  });
+
+  it("resumes npm, GHCR, and GitHub Release publication idempotently", async () => {
+    const workflow = await workflowAt(".github/workflows/release.yml");
+    const steps = workflow.jobs.publish.steps ?? [];
+    const npmState = steps.find(
+      (step) => step.name === "Resolve npm publication state",
+    );
+    const npmPublish = steps.find(
+      (step) => step.name === "Publish npm package with provenance",
+    );
+    const imageState = steps.find(
+      (step) => step.name === "Resolve existing GHCR tags",
+    );
+    const imageRepair = steps.find(
+      (step) => step.name === "Restore a missing GHCR tag",
+    );
+    const imageBuild = steps.find(
+      (step) => step.name === "Build and publish a new GHCR image",
+    );
+    const release = steps.find(
+      (step) => step.name === "Create or update the GitHub Release",
+    );
+
+    expect(npmState?.run).toContain("scripts/release-state.sh npm");
+    expect(npmPublish?.if).toContain(
+      "steps.npm_state.outputs.publish == 'true'",
+    );
+    expect(imageState?.run).toContain(
+      'scripts/release-state.sh image "$IMAGE" "$VERSION" "$SHA_TAG"',
+    );
+    expect(imageRepair?.run).toContain("docker buildx imagetools create");
+    expect(imageBuild?.if).toContain(
+      "steps.image_state.outputs.build == 'true'",
+    );
+    expect(release?.run).toContain(
+      'scripts/release-state.sh release "$GITHUB_REF_NAME" release-notes.md',
+    );
   });
 });
 

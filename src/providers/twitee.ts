@@ -13,7 +13,7 @@ import type {
   SearchProfilesResult,
   SearchResult,
 } from "../domain/types.js";
-import type { SearchProvider } from "./provider.js";
+import { type SearchProvider, withAbortDeadline } from "./provider.js";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -26,6 +26,7 @@ type TwiteeProviderOptions = {
   readonly fetch: FetchLike;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly maxPollAttempts?: number;
+  readonly requestTimeoutMs?: number;
 };
 
 const paginationSchema = z
@@ -140,11 +141,15 @@ const errorEnvelopeSchema = z
   .strict();
 
 const continuationSchema = z
-  .object({ page: z.number().int().positive() })
+  .object({
+    page: z.number().int().positive(),
+    generation: z.string().min(1),
+  })
   .strict();
 
 const defaultPollAttempts = 5;
 const pollIntervalMilliseconds = 2_000;
+const defaultRequestTimeoutMilliseconds = 8_000;
 
 type Branch<Item> = {
   readonly generation: string;
@@ -173,11 +178,22 @@ export function createTwiteeProvider(
 ): SearchProvider {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const maxPollAttempts = options.maxPollAttempts ?? defaultPollAttempts;
+  const requestTimeoutMilliseconds =
+    options.requestTimeoutMs ?? defaultRequestTimeoutMilliseconds;
 
   if (!Number.isSafeInteger(maxPollAttempts) || maxPollAttempts < 1) {
     throw new SafeError(
       "CONFIG_INVALID",
       "Twitee poll attempts must be positive",
+    );
+  }
+  if (
+    !Number.isSafeInteger(requestTimeoutMilliseconds) ||
+    requestTimeoutMilliseconds < 1
+  ) {
+    throw new SafeError(
+      "CONFIG_INVALID",
+      "Twitee request timeout must be positive",
     );
   }
 
@@ -187,6 +203,7 @@ export function createTwiteeProvider(
     page: number,
     limit: number,
     itemSchema: z.ZodType<Item>,
+    signal: AbortSignal,
   ): Promise<{
     envelope: Envelope<Item>;
     branch: Branch<Item>;
@@ -197,6 +214,7 @@ export function createTwiteeProvider(
         `${baseUrl}/api/search/${branch}`,
         { query, page, limit },
         attempt === 0 ? "foreground" : "retry",
+        signal,
       );
       const parsed = envelopeSchema(branch, itemSchema).safeParse(
         await readJson(response),
@@ -233,6 +251,7 @@ export function createTwiteeProvider(
     url: string,
     body: { query: string; page: number; limit: number },
     purpose: "foreground" | "retry",
+    signal: AbortSignal,
   ): Promise<Response> => {
     let response: Response;
     try {
@@ -246,6 +265,7 @@ export function createTwiteeProvider(
             : {}),
         },
         body: JSON.stringify(body),
+        signal,
       });
     } catch (error) {
       throw unavailable(error);
@@ -274,40 +294,67 @@ export function createTwiteeProvider(
   };
 
   const posts = async (input: SearchPostsInput): Promise<SearchPostsResult> => {
-    const page = pageFor(input.cursor, "search_posts", input.query);
-    const response = await requestBranch(
-      "latest",
-      input.query,
-      page,
-      input.limit,
-      postItemSchema,
-    );
-    return result(
-      response,
-      response.branch.items.map(mapPost),
-      "search_posts",
-      input.query,
-    );
+    return bounded(input.signal, async (signal) => {
+      const continuation = pageFor(input.cursor, "search_posts", input.query);
+      const response = await requestBranch(
+        "latest",
+        input.query,
+        continuation.page,
+        input.limit,
+        postItemSchema,
+        signal,
+      );
+      assertGeneration(response.branch.generation, continuation.generation);
+      return result(
+        response,
+        response.branch.items.map(mapPost),
+        "search_posts",
+        input.query,
+      );
+    });
+  };
+
+  const bounded = async <T>(
+    signal: AbortSignal | undefined,
+    operation: (requestSignal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await withAbortDeadline(
+        signal,
+        requestTimeoutMilliseconds,
+        operation,
+      );
+    } catch (error) {
+      if (error instanceof SafeError) throw error;
+      throw unavailable(error);
+    }
   };
 
   const profiles = async (
     input: SearchProfilesInput,
-  ): Promise<SearchProfilesResult> => {
-    const page = pageFor(input.cursor, "search_profiles", input.query);
-    const response = await requestBranch(
-      "people",
-      input.query,
-      page,
-      input.limit,
-      profileItemSchema,
-    );
-    return result(
-      response,
-      response.branch.items.map(mapProfile),
-      "search_profiles",
-      input.query,
-    );
-  };
+  ): Promise<SearchProfilesResult> =>
+    bounded(input.signal, async (signal) => {
+      const continuation = pageFor(
+        input.cursor,
+        "search_profiles",
+        input.query,
+      );
+      const response = await requestBranch(
+        "people",
+        input.query,
+        continuation.page,
+        input.limit,
+        profileItemSchema,
+        signal,
+      );
+      assertGeneration(response.branch.generation, continuation.generation);
+      return result(
+        response,
+        response.branch.items.map(mapProfile),
+        "search_profiles",
+        input.query,
+      );
+    });
 
   return {
     id: "twitee",
@@ -318,28 +365,28 @@ export function createTwiteeProvider(
     },
     searchPosts: posts,
     searchProfiles: profiles,
-    lookupProfile: async (
-      input: LookupProfileInput,
-    ): Promise<ProfileResult> => {
-      const query = exactHandle(input.handle);
-      const response = await requestBranch(
-        "people",
-        query,
-        1,
-        1,
-        profileItemSchema,
-      );
-      return {
-        provider: "twitee",
-        status: response.status,
-        items: response.branch.items
-          .filter((item) => item.handle.toLowerCase() === query.slice(1))
-          .slice(0, 1)
-          .map(mapProfile),
-        pagination: { next_cursor: null, has_more: false },
-        metadata: metadata(response.envelope),
-      };
-    },
+    lookupProfile: async (input: LookupProfileInput): Promise<ProfileResult> =>
+      bounded(input.signal, async (signal) => {
+        const query = exactHandle(input.handle);
+        const response = await requestBranch(
+          "people",
+          query,
+          1,
+          1,
+          profileItemSchema,
+          signal,
+        );
+        return {
+          provider: "twitee",
+          status: response.status,
+          items: response.branch.items
+            .filter((item) => item.handle.toLowerCase() === query.slice(1))
+            .slice(0, 1)
+            .map(mapProfile),
+          pagination: { next_cursor: null, has_more: false },
+          metadata: metadata(response.envelope),
+        };
+      }),
   };
 }
 
@@ -347,9 +394,9 @@ function pageFor(
   cursor: string | null,
   tool: "search_posts" | "search_profiles",
   query: string,
-): number {
+): { page: number; generation?: string } {
   if (cursor === null) {
-    return 1;
+    return { page: 1 };
   }
   const continuation = continuationSchema.safeParse(
     decodeCursor(cursor, { tool, provider: "twitee", query }),
@@ -357,7 +404,16 @@ function pageFor(
   if (!continuation.success) {
     throw new SafeError("INVALID_INPUT", "Invalid cursor");
   }
-  return continuation.data.page;
+  return continuation.data;
+}
+
+function assertGeneration(actual: string, expected: string | undefined): void {
+  if (expected !== undefined && actual !== expected) {
+    throw new SafeError(
+      "INVALID_INPUT",
+      "Cursor generation is no longer current",
+    );
+  }
 }
 
 function result<Item, Mapped>(
@@ -382,7 +438,10 @@ function result<Item, Mapped>(
             tool,
             provider: "twitee",
             query,
-            continuation: { page: response.branch.pagination.page + 1 },
+            continuation: {
+              page: response.branch.pagination.page + 1,
+              generation: response.branch.generation,
+            },
           })
         : null,
     },

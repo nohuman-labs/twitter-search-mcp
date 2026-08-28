@@ -12,6 +12,7 @@ it("typechecks every repository script through the normal TypeScript project", a
   ]);
 
   expect(stdout).toContain("scripts/doctor.ts");
+  expect(stdout).toContain("scripts/ensure-check-config.ts");
   expect(stdout).toContain("scripts/generate-config.ts");
   expect(stdout).toContain("scripts/smoke-mcp.ts");
 });

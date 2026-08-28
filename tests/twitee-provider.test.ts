@@ -69,7 +69,7 @@ it("maps latest results and an opaque continuation", async () => {
       provider: "twitee",
       query: "mcp",
     }),
-  ).toEqual({ page: 2 });
+  ).toEqual({ page: 2, generation: "search:query-1:request-1:7" });
 });
 
 it("uses an opaque cursor for the next latest page", async () => {
@@ -98,6 +98,169 @@ it("uses an opaque cursor for the next latest page", async () => {
       body: JSON.stringify({ query: "mcp", page: 2, limit: 20 }),
     }),
   );
+});
+
+it("rejects a latest cursor when Twitee changes generation", async () => {
+  const firstPayload = await fixture("latest-ready.json");
+  const nextPayload = structuredClone(firstPayload) as {
+    data: { latest: { generation: string } };
+  };
+  nextPayload.data.latest.generation = "replacement-generation";
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify(firstPayload)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(nextPayload)));
+  const provider = createTwiteeProvider({
+    baseUrl: "https://twitee.test",
+    token: "",
+    fetch,
+    sleep: async () => {},
+  });
+  const first = await provider.searchPosts({
+    query: "mcp",
+    limit: 20,
+    cursor: null,
+  });
+
+  await expect(
+    provider.searchPosts({
+      query: "mcp",
+      limit: 20,
+      cursor: first.pagination.next_cursor,
+    }),
+  ).rejects.toMatchObject({
+    code: "INVALID_INPUT",
+    message: "Cursor generation is no longer current",
+  });
+});
+
+it("carries generation through fuzzy profile pagination", async () => {
+  const payload = (await fixture("people-ready.json")) as {
+    data: {
+      people: {
+        generation: string;
+        pagination: { totalPages: number; hasMore: boolean };
+      };
+    };
+  };
+  payload.data.people.pagination.totalPages = 2;
+  payload.data.people.pagination.hasMore = true;
+  const fetch = vi.fn(async () => new Response(JSON.stringify(payload)));
+  const provider = createTwiteeProvider({
+    baseUrl: "https://twitee.test",
+    token: "",
+    fetch,
+    sleep: async () => {},
+  });
+
+  const first = await provider.searchProfiles?.({
+    query: "open",
+    limit: 2,
+    cursor: null,
+  });
+  expect(
+    decodeCursor(first?.pagination.next_cursor ?? "", {
+      tool: "search_profiles",
+      provider: "twitee",
+      query: "open",
+    }),
+  ).toEqual({
+    page: 2,
+    generation: "search:query-2:request-2:7",
+  });
+
+  await provider.searchProfiles?.({
+    query: "open",
+    limit: 2,
+    cursor: first?.pagination.next_cursor ?? null,
+  });
+  expect(fetch).toHaveBeenLastCalledWith(
+    "https://twitee.test/api/search/people",
+    expect.objectContaining({
+      body: JSON.stringify({ query: "open", page: 2, limit: 2 }),
+    }),
+  );
+});
+
+it("rejects a fuzzy profile cursor when Twitee changes generation", async () => {
+  const firstPayload = (await fixture("people-ready.json")) as {
+    data: {
+      people: {
+        generation: string;
+        pagination: { totalPages: number; hasMore: boolean };
+      };
+    };
+  };
+  firstPayload.data.people.pagination.totalPages = 2;
+  firstPayload.data.people.pagination.hasMore = true;
+  const nextPayload = structuredClone(firstPayload);
+  nextPayload.data.people.generation = "replacement-generation";
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify(firstPayload)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(nextPayload)));
+  const provider = createTwiteeProvider({
+    baseUrl: "https://twitee.test",
+    token: "",
+    fetch,
+    sleep: async () => {},
+  });
+  const first = await provider.searchProfiles?.({
+    query: "open",
+    limit: 2,
+    cursor: null,
+  });
+
+  await expect(
+    provider.searchProfiles?.({
+      query: "open",
+      limit: 2,
+      cursor: first?.pagination.next_cursor ?? null,
+    }),
+  ).rejects.toMatchObject({
+    code: "INVALID_INPUT",
+    message: "Cursor generation is no longer current",
+  });
+});
+
+it("times out a hanging Twitee request within its bounded poll window", async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  const provider = createTwiteeProvider({
+    baseUrl: "https://twitee.test",
+    token: "",
+    requestTimeoutMs: 10,
+    fetch: async (_input, init) => {
+      upstreamSignal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => {
+        const fallback = setTimeout(
+          () => reject(new Error("raw-twitee-timeout-marker")),
+          150,
+        );
+        upstreamSignal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(fallback);
+            reject(new Error("raw-twitee-abort-marker"));
+          },
+          { once: true },
+        );
+      });
+    },
+    sleep: async () => {},
+  });
+  const startedAt = Date.now();
+
+  const error = await provider
+    .searchPosts({ query: "mcp", limit: 20, cursor: null })
+    .catch((caught: unknown) => caught);
+
+  expect(Date.now() - startedAt).toBeLessThan(100);
+  expect(upstreamSignal?.aborted).toBe(true);
+  expect(error).toMatchObject({
+    code: "UPSTREAM_UNAVAILABLE",
+    message: "Twitee is temporarily unavailable",
+  });
+  expect(JSON.stringify(error.toPublic())).not.toContain("raw-twitee");
 });
 
 it("normalizes an exact handle lookup and maps a profile", async () => {

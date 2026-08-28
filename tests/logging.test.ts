@@ -59,3 +59,13 @@ it("redacts cyclic arrays without leaking tokens or queries", () => {
     context: ["[REDACTED]", {}, "[CIRCULAR]"],
   });
 });
+
+it("redacts overlapping token values without exposing a suffix", () => {
+  const output = captureLog(createLogger(["abc", "abcdef"]), {
+    cause: "Bearer abcdef",
+  });
+
+  expect(output).not.toContain("abc");
+  expect(output).not.toContain("def");
+  expect(JSON.parse(output)).toEqual({ cause: "Bearer [REDACTED]" });
+});

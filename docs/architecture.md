@@ -37,7 +37,7 @@ The configuration default selects a provider when a request omits `provider`. Wh
 
 ## Pagination and output
 
-The MCP cursor is opaque but not secret. It carries provider continuation state and is bound to the tool name, selected provider, and normalized query. Reusing it in a different context is rejected.
+The MCP cursor is opaque but not secret. It carries provider continuation state and is bound to the tool name, selected provider, and normalized query. Twitee cursors carry the next page and result generation; stale generations are rejected. X cursors retain any rows not yet returned when the upstream minimum page size exceeds the requested limit. Reusing a cursor in a different context is rejected.
 
 Results use one normalized shape: `provider`, `status`, `items`, `pagination`, and `metadata`. The common `limit` defaults to 20 and caps at 50. Results are available as structured MCP content and JSON text fallback.
 
@@ -46,3 +46,5 @@ Results use one normalized shape: `provider`, `status`, `items`, `pagination`, a
 Access is anonymous or a single shared bearer token. The bearer is deployment-owned; v1 has no MCP OAuth, multi-token identity, or per-client X credentials. Tokens come from private YAML, not environment interpolation.
 
 Rate limiting sits before provider requests as an abuse guard. Its counter scope is runtime dependent and is not global quota or accounting. See [providers](providers.md) and the deployment guides for provider and runtime details.
+
+Provider fetches inherit request cancellation and have an eight-second v1 deadline. The Node runtime rejects MCP request bodies larger than 1 MiB before the transport can buffer them.

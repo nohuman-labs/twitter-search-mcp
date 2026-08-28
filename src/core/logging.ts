@@ -2,7 +2,9 @@ export type LogFields = Record<string, unknown>;
 export type Logger = (fields: LogFields) => void;
 
 export function createLogger(tokens: readonly string[]): Logger {
-  const redactionTokens = tokens.filter((token) => token.length > 0);
+  const redactionTokens = [
+    ...new Set(tokens.filter((token) => token.length > 0)),
+  ].sort((left, right) => right.length - left.length);
 
   return (fields) => {
     console.log(JSON.stringify(redact(fields, redactionTokens, new WeakSet())));

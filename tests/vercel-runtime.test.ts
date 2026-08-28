@@ -75,10 +75,102 @@ it("rejects a cross-origin MCP post before dispatch", async () => {
   );
 
   expect(response.status).toBe(400);
+  expect(response.headers.get("access-control-allow-origin")).toBeNull();
   await expect(response.json()).resolves.toEqual({
     code: "INVALID_INPUT",
     message: "Invalid origin",
   });
+});
+
+it("reflects an accepted POST origin on success and safe errors", async () => {
+  const successHandler = createVercelHandler({
+    config: testConfig(),
+    mcpHandler: async () =>
+      new Response("{}", { headers: { Vary: "Accept-Encoding" } }),
+  });
+  const success = await successHandler(
+    new Request("https://example.test/mcp", {
+      method: "POST",
+      headers: { origin: "https://example.test" },
+      body: "{}",
+    }),
+  );
+
+  expect(success.headers.get("access-control-allow-origin")).toBe(
+    "https://example.test",
+  );
+  expect(success.headers.get("vary")).toBe("Accept-Encoding, Origin");
+
+  const errorHandler = createVercelHandler({
+    config: testConfig(bearerAccess()),
+    mcpHandler: async () => new Response("{}"),
+  });
+  const denied = await errorHandler(
+    new Request("https://example.test/mcp", {
+      method: "POST",
+      headers: { origin: "https://example.test" },
+      body: "{}",
+    }),
+  );
+
+  expect(denied.status).toBe(401);
+  expect(denied.headers.get("access-control-allow-origin")).toBe(
+    "https://example.test",
+  );
+  expect(denied.headers.get("vary")).toBe("Origin");
+});
+
+it("propagates a Vercel request abort to an in-flight provider fetch", async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const handler = createVercelHandler({
+    config: testConfig(),
+    dependencies: {
+      fetch: async (_input, init) => {
+        upstreamSignal = init?.signal ?? undefined;
+        markStarted?.();
+        return await new Promise<Response>((_resolve, reject) => {
+          const fallback = setTimeout(
+            () => reject(new Error("raw-vercel-provider-marker")),
+            250,
+          );
+          upstreamSignal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(fallback);
+              reject(new Error("raw-vercel-abort-marker"));
+            },
+            { once: true },
+          );
+        });
+      },
+    },
+  });
+  const controller = new AbortController();
+  const pending = handler(
+    new Request("https://example.test/mcp", {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "search_posts", arguments: { query: "mcp" } },
+      }),
+      signal: controller.signal,
+    }),
+  ).catch(() => undefined);
+
+  await started;
+  controller.abort();
+  await pending;
+  await vi.waitFor(() => expect(upstreamSignal?.aborted).toBe(true));
 });
 
 it("requires bearer credentials before MCP dispatch", async () => {

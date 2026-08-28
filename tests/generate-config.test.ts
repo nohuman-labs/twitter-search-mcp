@@ -30,12 +30,36 @@ it("maps a one-minute limit to a Workers simple binding", async () => {
     ratelimit: { enabled: true, limit: 60, window: "1m" },
   });
 
-  const artifacts = await generateServerlessArtifacts(configPath, outputDir);
+  const namespaceId = "1".repeat(32);
+  const artifacts = await generateServerlessArtifacts(configPath, outputDir, {
+    rateLimitNamespaceId: namespaceId,
+  });
 
   expect(artifacts.wrangler.ratelimits?.[0]?.simple).toEqual({
     limit: 60,
     period: 60,
   });
+  expect(artifacts.wrangler.ratelimits?.[0]?.namespace_id).toBe(namespaceId);
+});
+
+it("requires a non-placeholder namespace when Cloudflare limiting is enabled", async () => {
+  const { configPath, outputDir } = await fixture({
+    ratelimit: { enabled: true, limit: 60, window: "1m" },
+  });
+
+  await expect(
+    generateServerlessArtifacts(configPath, outputDir),
+  ).rejects.toMatchObject({ code: "CONFIG_INVALID" });
+  await expect(
+    generateServerlessArtifacts(configPath, outputDir, {
+      rateLimitNamespaceId: "0".repeat(32),
+    }),
+  ).rejects.toMatchObject({ code: "CONFIG_INVALID" });
+  await expect(
+    generateServerlessArtifacts(configPath, outputDir, {
+      rateLimitNamespaceId: "replace-with-real-namespace",
+    }),
+  ).rejects.toMatchObject({ code: "CONFIG_INVALID" });
 });
 
 it("writes configured tokens only to the ignored generated module", async () => {

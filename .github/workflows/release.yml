@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   metadata:
     name: Validate release tag
@@ -80,25 +84,14 @@ jobs:
       - run: npm run build
       - name: Inspect the built release package
         run: npm pack --dry-run --ignore-scripts --json
-      - name: Check whether this release version already exists
+      - id: npm_state
+        name: Resolve npm publication state
         run: |
           package_name="$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).name\")"
           package_version="$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version\")"
-          set +e
-          result="$(npm view "$package_name@$package_version" version --json 2>&1)"
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            echo "$result"
-            echo "::error title=npm package version already published::$package_name@$package_version already exists. Bump package.json before releasing."
-            exit 1
-          fi
-          if ! printf '%s' "$result" | grep -q 'E404'; then
-            echo "$result"
-            echo "::error title=npm version check failed::Refusing to publish without a confirmed E404 response for $package_name@$package_version."
-            exit 1
-          fi
+          sh scripts/release-state.sh npm "$package_name" "$package_version"
       - name: Publish npm package with provenance
+        if: steps.npm_state.outputs.publish == 'true'
         run: |
           if ! npm publish --provenance --access public --ignore-scripts; then
             echo "::error title=npm publish rejected::If this is the first release and the unscoped name is owned by another publisher, change package.json to @${GITHUB_REPOSITORY_OWNER}/twitter-search-mcp before retrying."
@@ -113,7 +106,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image_state
+        name: Resolve existing GHCR tags
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          SHA_TAG: ${{ github.sha }}
+        run: sh scripts/release-state.sh image "$IMAGE" "$VERSION" "$SHA_TAG"
+      - name: Restore a missing GHCR tag
+        if: steps.image_state.outputs.repair == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.image_state.outputs.digest }}
+          MISSING_TAG: ${{ steps.image_state.outputs.missing_tag }}
+        run: docker buildx imagetools create --tag "$MISSING_TAG" "$IMAGE@$DIGEST"
       - id: build
+        name: Build and publish a new GHCR image
+        if: steps.image_state.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -122,12 +131,25 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ needs.metadata.outputs.version }}
             ${{ steps.image.outputs.name }}:${{ github.sha }}
-      - name: Create GitHub Release from the changelog
+      - id: image_digest
+        name: Record the immutable GHCR digest
+        env:
+          EXISTING_DIGEST: ${{ steps.image_state.outputs.digest }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="$EXISTING_DIGEST"
+          if [ -z "$digest" ]; then digest="$BUILT_DIGEST"; fi
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error title=Missing GHCR digest::Release image has no immutable digest."; exit 1 ;;
+          esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.metadata.outputs.version }}
           IMAGE: ${{ steps.image.outputs.name }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.image_digest.outputs.digest }}
         run: |
           changelog="$(awk -v version="$VERSION" '
             $0 == "## " version { found = 1; next }
@@ -142,4 +164,4 @@ jobs:
             echo "## Container image"
             printf '`%s@%s`\n' "$IMAGE" "$DIGEST"
           } > release-notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          sh scripts/release-state.sh release "$GITHUB_REF_NAME" release-notes.md
