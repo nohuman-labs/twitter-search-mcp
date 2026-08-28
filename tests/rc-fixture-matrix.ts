@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo, Server } from "node:net";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import type { AppConfig } from "../src/config/schema.js";
 import { createNodeServer } from "../src/runtimes/node.js";
 
@@ -128,9 +132,22 @@ async function verifyOverrideRejection(): Promise<void> {
       limit: 1,
     });
     assert.notEqual(result.exitCode, 0, result.output);
+
+    const protocolResult = await callTool(serverBase(server), "search_posts", {
+      query: branchQuery(latest, "latest"),
+      provider: "x",
+      limit: 1,
+    });
+    assert.equal(protocolResult.isError, true);
+    const firstContent = protocolResult.content[0];
+    assert.equal(firstContent?.type, "text");
+    assert.deepEqual(JSON.parse(firstContent.text), {
+      code: "INVALID_INPUT",
+      message: "Provider override is not allowed",
+    });
     assert.deepEqual(calls, { twitee: 0, x: 0 });
     console.log(
-      `Override-disabled rejection: PASS (adapter calls twitee=${calls.twitee}, x=${calls.x})`,
+      `Override-disabled INVALID_INPUT: PASS (adapter calls twitee=${calls.twitee}, x=${calls.x})`,
     );
   } finally {
     await closeServer(server);
@@ -260,6 +277,25 @@ async function smoke(
     child.on("error", reject);
     child.on("close", (exitCode) => resolve({ exitCode, output }));
   });
+}
+
+async function callTool(
+  base: string,
+  tool: string,
+  input: Record<string, unknown>,
+) {
+  const client = new Client({
+    name: "twitter-search-mcp-rc-verifier",
+    version: "1.0.0",
+  });
+  const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`));
+
+  try {
+    await client.connect(transport);
+    return await client.callTool({ name: tool, arguments: input });
+  } finally {
+    await client.close();
+  }
 }
 
 async function httpStatuses(base: string) {

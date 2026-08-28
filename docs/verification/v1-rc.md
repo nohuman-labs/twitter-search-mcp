@@ -45,7 +45,7 @@ The official `scripts/smoke-mcp.ts` client produced these deterministic results:
 | Twitee-only | Advertised and successfully called `search_posts`, `lookup_profile`, and `search_profiles` | 3 | 0 |
 | X-only | Advertised only `search_posts` and `lookup_profile` | 0 | 0 |
 | Dual-provider | An omitted provider used the Twitee default; an explicit X selection used X | 1 | 1 |
-| Override disabled | Explicit X selection was rejected before provider dispatch | 0 | 0 |
+| Override disabled | The official smoke client failed the call; a parallel MCP protocol assertion verified public code `INVALID_INPUT` and message `Provider override is not allowed` | 0 | 0 |
 
 The same fixture-backed Node server returned:
 
@@ -59,6 +59,22 @@ The same fixture-backed Node server returned:
 | Originless `OPTIONS /mcp` | 204 |
 | Same-origin `OPTIONS /mcp` | 204, with the approved origin and methods headers |
 | Cross-origin `OPTIONS /mcp` | 400 |
+
+## Final pre-commit staged-tree gate
+
+On 2026-08-28, after the RC evidence changes were staged and with no unstaged
+change, the final pre-commit tree gate ran in this order:
+
+1. `git status --short` listed only the two staged RC evidence paths:
+   `docs/verification/v1-rc.md` and `tests/rc-fixture-matrix.ts`.
+2. `git diff --check` exited 0 with no output. A supplementary
+   `git diff --cached --check` also exited 0 so the staged patch itself was
+   checked directly.
+3. `make check` exited 0: Biome checked 62 files without changes, TypeScript
+   passed, and Vitest passed 107 tests in 22 files.
+
+The commit was created immediately after this ordered gate without modifying
+the staged tree.
 
 ## Failed
 
