@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
+import packageMetadata from "../package.json" with { type: "json" };
 import type { AppConfig } from "../src/config/schema.js";
-import { createMcpServer } from "../src/core/server.js";
+import * as serverFactory from "../src/core/server.js";
 
 const config: AppConfig = {
   version: 1,
@@ -14,7 +15,7 @@ const config: AppConfig = {
 };
 
 it("creates an X-only server with the approved identity and tools", () => {
-  const server = createMcpServer(config, {
+  const server = serverFactory.createMcpServer(config, {
     fetch: async () => new Response(JSON.stringify({ data: [], meta: {} })),
   });
   const registered = server as unknown as {
@@ -26,10 +27,14 @@ it("creates an X-only server with the approved identity and tools", () => {
 
   expect(registered.server._serverInfo).toEqual({
     name: "twitter-search-mcp",
-    version: "1.0.0",
+    version: packageMetadata.version,
   });
   expect(Object.keys(registered._registeredTools)).toEqual([
     "search_posts",
     "lookup_profile",
   ]);
+});
+
+it("exports the package metadata version used for server identity", () => {
+  expect(serverFactory.serverVersion).toBe(packageMetadata.version);
 });

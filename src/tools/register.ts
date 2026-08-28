@@ -204,14 +204,17 @@ async function callTool(
   try {
     return success(await operation());
   } catch (error) {
-    if (error instanceof SafeError) {
-      const publicError = error.toPublic();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(publicError) }],
-        isError: true,
-      };
-    }
-    throw error;
+    const publicError =
+      error instanceof SafeError
+        ? error.toPublic()
+        : {
+            code: "UPSTREAM_UNAVAILABLE" as const,
+            message: "Search provider is temporarily unavailable",
+          };
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(publicError) }],
+      isError: true,
+    };
   }
 }
 

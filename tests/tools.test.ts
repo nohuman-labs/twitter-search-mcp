@@ -179,3 +179,27 @@ it("does not expose SafeError causes", async () => {
 
   expect(response.content[0].text).not.toContain("raw-upstream-secret");
 });
+
+it("returns a generic safe error for unexpected provider failures", async () => {
+  const tools = captureTools(
+    context("twitee", [
+      provider("twitee", async () => {
+        throw new Error("unexpected-sensitive-marker");
+      }),
+    ]),
+  );
+
+  const response = (await tool(tools, "search_posts").handler({
+    query: "mcp",
+  })) as {
+    readonly isError: boolean;
+    readonly content: readonly { readonly text: string }[];
+  };
+
+  expect(response.isError).toBe(true);
+  expect(JSON.parse(response.content[0].text)).toEqual({
+    code: "UPSTREAM_UNAVAILABLE",
+    message: "Search provider is temporarily unavailable",
+  });
+  expect(response.content[0].text).not.toContain("unexpected-sensitive-marker");
+});

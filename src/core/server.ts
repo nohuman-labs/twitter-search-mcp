@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
+import packageMetadata from "../../package.json" with { type: "json" };
 import type { AppConfig } from "../config/schema.js";
 import type { SearchProvider } from "../providers/provider.js";
 import { ProviderRegistry } from "../providers/registry.js";
@@ -16,7 +17,7 @@ export type McpServerDependencies = {
   readonly sleep?: (milliseconds: number) => Promise<void>;
 };
 
-const serverVersion = "1.0.0";
+export const serverVersion = packageMetadata.version;
 
 export function createMcpServer(
   config: AppConfig,
