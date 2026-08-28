@@ -99,3 +99,28 @@ release candidate must not be described as fully verified.
 - A Vercel application build after obtaining project-owned settings
 - Any publish, tag, push, deployment, project creation, project link, config
   pull, cluster apply, or production smoke test
+
+## Final fix-wave re-verification
+
+Commit `af4722d` addressed the final whole-branch review on 2026-08-28. This
+section supersedes the earlier local test counts while retaining the original
+Vercel blocker evidence.
+
+| Command or check | Outcome | Sanitized summary |
+| --- | --- | --- |
+| Focused runtime regressions | PASS | 31 tests covered Node Host/body/abort/CORS behavior, Worker binding/real-handler/abort/CORS behavior, and Vercel abort/CORS behavior. |
+| Focused provider and tool regressions | PASS | 34 tests covered X buffering, Twitee generations, provider deadlines, request-signal propagation, and overlapping-token redaction. |
+| Focused config and deployment regressions | PASS | 20 tests covered clean check configuration, sanitized YAML CLI failures, explicit Cloudflare namespaces, Make wiring, and operator documentation. |
+| Focused release and package regressions | PASS | 18 tests covered the Node 20 production graph, package contents, per-tag concurrency, and resumable npm/GHCR/GitHub Release states with stubbed commands. |
+| Fresh detached-checkout `npm ci`, `make check`, and `make build` | PASS | The ignored generated module was absent before the run; `make check` created the credential-free fallback, Biome and TypeScript passed, and 144 tests in 25 files passed. The tracked tree remained clean. |
+| Existing generated-config preservation | PASS | A digest-only before/after comparison was identical across `make check`; no private/generated deploy configuration was overwritten or printed. |
+| `npm pack --dry-run --json` inspection | PASS | Prepack build completed; 43 files were selected and no private config, generated config, tests, or scripts were present. |
+| Docker build and `tests/container-smoke.sh` | PASS | The final-fix image built and passed non-root, read-only, health, and readiness checks. |
+| Kustomize render | PASS | The example overlay rendered locally without a cluster operation. |
+| Wrangler dry-run | PASS | Both the limiter-disabled example and the enabled public example bundled without deployment; the latter reported the explicit `1001` binding at 60 requests per 10 seconds. |
+| `tests/rc-fixture-matrix.ts` | PASS | Twitee-only, X-only, dual-provider routing, override rejection, and the fixture HTTP matrix passed without live provider calls. |
+
+The Vercel application build was not retried: its existing structured blocker
+remains `project_settings_required`, and no login, link, pull, project creation,
+deployment, publication, tag, push, or live provider operation was performed.
+The release candidate therefore remains not fully externally verified.
