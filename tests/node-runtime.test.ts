@@ -57,6 +57,13 @@ function clientFor(
   return { client, transport };
 }
 
+function rateLimitedConfig(): AppConfig {
+  return {
+    ...testConfig(),
+    ratelimit: { enabled: true, limit: 1, window: "1m" },
+  };
+}
+
 it("mounts canonical stateless routes", async () => {
   const server = await createNodeServer({
     config: testConfig(),
@@ -124,6 +131,159 @@ it("serves tools and fixture-backed search posts over stateless MCP HTTP", async
         })
       ).structuredContent,
     ).toMatchObject({ provider: "x", items: [{ text: "MCP is here" }] });
+  } finally {
+    await client.close();
+    await closeServer(server);
+  }
+});
+
+it("closes each request-scoped MCP server and transport exactly once", async () => {
+  const transport = {
+    handleRequest: vi.fn(async (_request, response: ServerResponse) => {
+      response.end("{}");
+    }),
+    close: vi.fn(async () => {}),
+  };
+  const mcpServer = {
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory: () => mcpServer,
+    transportFactory: () => transport,
+  });
+  const base = serverAddress(server);
+
+  try {
+    expect(
+      (
+        await fetch(`${base}/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(200);
+    expect(transport.close).toHaveBeenCalledOnce();
+    expect(mcpServer.close).toHaveBeenCalledOnce();
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("tears down request-scoped MCP resources when the client aborts", async () => {
+  const transport = {
+    handleRequest: vi.fn(async () => new Promise<void>(() => {})),
+    close: vi.fn(async () => {}),
+  };
+  const mcpServer = {
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory: () => mcpServer,
+    transportFactory: () => transport,
+  });
+  const controller = new AbortController();
+  const request = fetch(`${serverAddress(server)}/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+    signal: controller.signal,
+  }).catch(() => undefined);
+
+  try {
+    await vi.waitFor(() =>
+      expect(transport.handleRequest).toHaveBeenCalledOnce(),
+    );
+    controller.abort();
+    await request;
+    await vi.waitFor(() => {
+      expect(transport.close).toHaveBeenCalledOnce();
+      expect(mcpServer.close).toHaveBeenCalledOnce();
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("tears down request-scoped MCP resources after dispatch errors", async () => {
+  const transport = {
+    handleRequest: vi.fn(async () => {
+      throw new Error("dispatch failed");
+    }),
+    close: vi.fn(async () => {}),
+  };
+  const mcpServer = {
+    connect: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const server = await createNodeServer({
+    config: testConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    mcpServerFactory: () => mcpServer,
+    transportFactory: () => transport,
+  });
+
+  try {
+    const response = await fetch(`${serverAddress(server)}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "Request could not be completed",
+    });
+    expect(transport.close).toHaveBeenCalledOnce();
+    expect(mcpServer.close).toHaveBeenCalledOnce();
+  } finally {
+    await closeServer(server);
+  }
+});
+
+it("rate limits MCP POSTs while allowing OPTIONS to bypass the limiter", async () => {
+  const limiter = {
+    take: vi
+      .fn()
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValue({ allowed: false, retryAfterSeconds: 19 }),
+  };
+  const server = await createNodeServer({
+    config: rateLimitedConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    dependencies: { fetch: fixtureFetch() },
+    rateLimiter: limiter,
+  });
+  const base = serverAddress(server);
+  const { client, transport } = clientFor(base);
+
+  try {
+    expect((await fetch(`${base}/mcp`, { method: "OPTIONS" })).status).toBe(
+      204,
+    );
+    expect(limiter.take).not.toHaveBeenCalled();
+
+    await client.connect(transport);
+    expect(limiter.take).toHaveBeenCalledTimes(2);
+
+    const denied = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get("retry-after")).toBe("19");
   } finally {
     await client.close();
     await closeServer(server);

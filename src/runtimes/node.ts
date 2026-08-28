@@ -34,6 +34,8 @@ export type NodeServerOptions = {
   readonly dependencies?: McpServerDependencies;
   readonly rateLimiter?: RateLimiter;
   readonly logger?: Logger;
+  readonly mcpServerFactory?: typeof createMcpServer;
+  readonly transportFactory?: () => NodeStreamableHTTPServerTransport;
 };
 
 const defaultHost = "127.0.0.1";
@@ -57,6 +59,14 @@ export async function createNodeServer(
       options.config.providers.x.token,
     ]);
   const dependencies = options.dependencies ?? { fetch: globalThis.fetch };
+  const mcpServerFactory = options.mcpServerFactory ?? createMcpServer;
+  const transportFactory =
+    options.transportFactory ??
+    (() =>
+      new NodeStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      }));
 
   const server = createServer((request, response) => {
     void handleRequest({
@@ -66,6 +76,8 @@ export async function createNodeServer(
       dependencies,
       rateLimiter,
       logger,
+      mcpServerFactory,
+      transportFactory,
     });
   });
 
@@ -84,6 +96,8 @@ type RequestContext = {
   readonly dependencies: McpServerDependencies;
   readonly rateLimiter: RateLimiter | undefined;
   readonly logger: Logger;
+  readonly mcpServerFactory: typeof createMcpServer;
+  readonly transportFactory: () => NodeStreamableHTTPServerTransport;
 };
 
 async function handleRequest(context: RequestContext): Promise<void> {
@@ -153,6 +167,8 @@ async function handleMcpRequest(
     dependencies,
     rateLimiter,
     logger,
+    mcpServerFactory,
+    transportFactory,
   }: RequestContext,
   url: URL,
 ): Promise<void> {
@@ -174,15 +190,28 @@ async function handleMcpRequest(
       }
     }
 
-    const transport = new NodeStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+    const transport = transportFactory();
+    const mcpServer = mcpServerFactory(config, dependencies);
+    const teardown = once(async () => {
+      await Promise.allSettled([transport.close(), mcpServer.close()]);
     });
-    await createMcpServer(config, dependencies).connect(transport);
-    await transport.handleRequest(request, response);
-    logger({ method: "POST", path: MCP_PATH, status: response.statusCode });
+    const abort = () => {
+      void teardown();
+    };
+    request.once("aborted", abort);
+    response.once("close", abort);
+
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(request, response);
+      logger({ method: "POST", path: MCP_PATH, status: response.statusCode });
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abort);
+      await teardown();
+    }
   } catch (error) {
-    if (!response.writableEnded) {
+    if (!response.writableEnded && !response.destroyed) {
       await writeSafeError(response, error);
     }
     logger({
@@ -192,6 +221,14 @@ async function handleMcpRequest(
       ...(error instanceof SafeError ? { code: error.code } : {}),
     });
   }
+}
+
+function once(operation: () => Promise<void>): () => Promise<void> {
+  let result: Promise<void> | undefined;
+  return () => {
+    result ??= operation();
+    return result;
+  };
 }
 
 function requestUrl(request: IncomingMessage): URL {
