@@ -50,7 +50,38 @@ it("loads and validates YAML configuration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "twitter-search-mcp-"));
   directories.push(directory);
   const path = join(directory, "mcp.config.yaml");
-  await writeFile(path, JSON.stringify(base));
+  await writeFile(
+    path,
+    `version: 1
+access:
+  mode: anonymous
+  token: ""
+search:
+  default_provider: twitee
+  allow_provider_override: true
+providers:
+  twitee:
+    enabled: true
+    base_url: https://twitee.co
+    token: ""
+  x:
+    enabled: false
+    base_url: https://api.x.com
+    token: ""
+ratelimit:
+  enabled: false
+  limit: 60
+  window: 1m
+`,
+  );
 
   await expect(loadConfig(path)).resolves.toEqual(base);
+});
+it("rejects malformed YAML configuration", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "twitter-search-mcp-"));
+  directories.push(directory);
+  const path = join(directory, "mcp.config.yaml");
+  await writeFile(path, "version: 1\naccess: [");
+
+  await expect(loadConfig(path)).rejects.toThrow();
 });
