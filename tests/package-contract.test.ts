@@ -27,7 +27,7 @@ type WorkflowJob = {
   };
 };
 
-type WorkflowStep = { readonly run?: string };
+type WorkflowStep = { readonly name?: string; readonly run?: string };
 
 describe("published package", () => {
   it("publishes only built runtime files and the required public documents", async () => {
@@ -111,6 +111,38 @@ describe("published package", () => {
       packages: "write",
       "id-token": "write",
     });
+  });
+
+  it("prepares and inspects the exact package version before publishing", async () => {
+    const workflow = await workflowAt(".github/workflows/release.yml");
+    const steps = workflow.jobs.publish.steps ?? [];
+    const commands = steps.map((step) => step.run ?? "");
+    const installIndex = commands.indexOf("npm ci");
+    const buildIndex = commands.indexOf("npm run build");
+    const packIndex = commands.indexOf(
+      "npm pack --dry-run --ignore-scripts --json",
+    );
+    const checkIndex = steps.findIndex(
+      (step) =>
+        step.name === "Check whether this release version already exists",
+    );
+    const publishIndex = commands.findIndex((command) =>
+      command.includes(
+        "npm publish --provenance --access public --ignore-scripts",
+      ),
+    );
+    const versionCheck = steps[checkIndex]?.run;
+
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(buildIndex).toBeGreaterThan(installIndex);
+    expect(packIndex).toBeGreaterThan(buildIndex);
+    expect(checkIndex).toBeGreaterThan(packIndex);
+    expect(publishIndex).toBeGreaterThan(checkIndex);
+    expect(versionCheck).toContain(
+      'npm view "$package_name@$package_version" version --json',
+    );
+    expect(versionCheck).toContain('if [ "$status" -eq 0 ]; then');
+    expect(versionCheck).toContain("grep -q 'E404'");
   });
 });
 

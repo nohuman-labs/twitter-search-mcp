@@ -76,25 +76,34 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: Recheck that the unscoped npm name is available
+      - run: npm ci
+      - run: npm run build
+      - name: Inspect the built release package
+        run: npm pack --dry-run --ignore-scripts --json
+      - name: Check whether this release version already exists
         run: |
           package_name="$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).name\")"
+          package_version="$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version\")"
           set +e
-          result="$(npm view "$package_name" version --json 2>&1)"
+          result="$(npm view "$package_name@$package_version" version --json 2>&1)"
           status=$?
           set -e
           if [ "$status" -eq 0 ]; then
             echo "$result"
-            echo "::error title=npm package name unavailable::$package_name already exists. Rename to @${GITHUB_REPOSITORY_OWNER}/twitter-search-mcp before publishing."
+            echo "::error title=npm package version already published::$package_name@$package_version already exists. Bump package.json before releasing."
             exit 1
           fi
           if ! printf '%s' "$result" | grep -q 'E404'; then
             echo "$result"
-            echo "::error title=npm availability check failed::Refusing to publish without a confirmed E404 response."
+            echo "::error title=npm version check failed::Refusing to publish without a confirmed E404 response for $package_name@$package_version."
             exit 1
           fi
       - name: Publish npm package with provenance
-        run: npm publish --provenance --access public
+        run: |
+          if ! npm publish --provenance --access public --ignore-scripts; then
+            echo "::error title=npm publish rejected::If this is the first release and the unscoped name is owned by another publisher, change package.json to @${GITHUB_REPOSITORY_OWNER}/twitter-search-mcp before retrying."
+            exit 1
+          fi
       - id: image
         name: Define immutable GHCR image name
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/twitter-search-mcp" >> "$GITHUB_OUTPUT"
