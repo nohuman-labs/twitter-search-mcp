@@ -20,7 +20,7 @@ Connect an MCP client to `http://127.0.0.1:3000/mcp`. The canonical endpoint is 
 | Twitee | yes | yes | yes |
 | X | yes | yes | no |
 
-Twitee is the default in the example configuration, not a privileged architecture path. A call uses exactly one provider: it never attempts a fallback to another provider and never merges results. When both are enabled, clients choose X by passing `provider: "x"` to a tool call (if `allow_provider_override` is true); otherwise the configured default is used. An X-only deployment does not advertise `search_profiles`.
+Twitee is the default in the example configuration, not a privileged architecture path. A call uses exactly one provider: it never attempts a fallback to another provider and never merges results. When a provider is omitted, the configured default is used. An explicit different provider is accepted only when `allow_provider_override` is true. When `allow_provider_override` is false, an explicit different provider is rejected; it is never changed to the default or another provider. An X-only deployment does not advertise `search_profiles`.
 
 See [provider details](docs/providers.md) and [architecture](docs/architecture.md) for the contract, including opaque cursors bound to the tool, provider, and query.
 

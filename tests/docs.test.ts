@@ -27,6 +27,17 @@ it("documents the provider capabilities and configuration paths", async () => {
   expect(readme).toMatch(/dual-provider/i);
 });
 
+it("documents rejection for an override-disabled explicit provider", async () => {
+  const readme = await read("README.md");
+
+  expect(readme).toContain(
+    "When a provider is omitted, the configured default is used.",
+  );
+  expect(readme).toContain(
+    "When `allow_provider_override` is false, an explicit different provider is rejected; it is never changed to the default or another provider.",
+  );
+});
+
 it("documents direct-token artifact handling and rotation", async () => {
   const security = await read("SECURITY.md");
 
