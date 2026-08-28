@@ -264,7 +264,40 @@ MCP request
 
 The server is stateless from the MCP transport perspective. A search call does not create a durable MCP session or background task.
 
-## 9. Access control
+## 9. HTTP endpoint contract
+
+Every supported runtime exposes the same canonical MCP URL:
+
+```text
+https://<host>/mcp
+```
+
+The version 1 HTTP surface is:
+
+```text
+POST    /mcp       MCP Streamable HTTP requests
+OPTIONS /mcp       CORS preflight when required
+GET     /mcp       405 Method Not Allowed
+DELETE  /mcp       405 Method Not Allowed
+
+GET     /healthz   Process and runtime liveness
+GET     /readyz    Configuration and provider initialization readiness
+```
+
+Endpoint rules:
+
+- The MCP server is stateless and does not open a standalone SSE stream, so `GET /mcp` returns 405.
+- The server does not create transport sessions, so `DELETE /mcp` returns 405.
+- Version 1 does not expose a legacy `/sse` endpoint.
+- Vercel rewrites its platform function path so clients still connect to `/mcp`, not `/api/mcp`.
+- Providers do not receive separate MCP endpoints. Twitee and X are selected through configuration and tool arguments.
+- Bearer access control and rate limiting apply to `/mcp` requests.
+- `OPTIONS /mcp`, `/healthz`, and `/readyz` do not require bearer access.
+- Health responses expose only generic status and version information, never configuration values, provider tokens, or access tokens.
+- Origin-less requests remain valid for non-browser MCP clients.
+- Requests that contain an `Origin` header must pass runtime Origin validation before MCP dispatch.
+
+## 10. Access control
 
 Version 1 supports:
 
@@ -275,7 +308,7 @@ The bearer comparison must avoid ordinary early-exit string comparison. Logs and
 
 The access interface must permit a later multi-token implementation without changing provider or tool contracts. Multi-token identity and MCP OAuth are outside version 1.
 
-## 10. Rate limiting
+## 11. Rate limiting
 
 The YAML surface is deliberately small:
 
@@ -300,7 +333,7 @@ Runtime semantics:
 
 The feature is an abuse/burst guard, not exact quota or accounting. Documentation and `make doctor` must not describe it as globally consistent. A future distributed backend may be added without changing the YAML's simple limit/window fields.
 
-## 11. Runtime architecture
+## 12. Runtime architecture
 
 The core uses TypeScript and Web Standard APIs. Platform-specific APIs appear only in runtime adapters.
 
@@ -328,7 +361,7 @@ src/runtimes/vercel.ts
 
 Workers and Vercel validate YAML during build and generate a configuration module. Node validates YAML at process startup and accepts `--config <path>`.
 
-## 12. Repository structure
+## 13. Repository structure
 
 The project begins as one npm package rather than a monorepo.
 
@@ -367,7 +400,7 @@ twitter-search-mcp/
 
 Files stay separated by responsibility. Platform adapters may depend on core; core may not import platform adapters.
 
-## 13. Deployment support
+## 14. Deployment support
 
 Support is tiered by verified behavior:
 
@@ -379,7 +412,7 @@ The project does not claim support for a platform until a repeatable smoke test 
 
 Kubernetes version 1 uses plain manifests/Kustomize rather than Helm. Images are published to GHCR for tagged releases.
 
-## 14. Makefile interface
+## 15. Makefile interface
 
 The Makefile is a thin wrapper over npm scripts and platform CLIs.
 
@@ -406,7 +439,7 @@ Rules:
 - `make clean` removes only known generated/build artifacts and never removes private config or user data.
 - npm scripts remain available for systems without Make.
 
-## 15. Errors
+## 16. Errors
 
 Tool-level errors use stable normalized codes:
 
@@ -423,7 +456,7 @@ CONFIG_INVALID
 
 Errors may include `retry_after_seconds` when known. Raw upstream error bodies are not returned when they may contain credentials or implementation details. Upstream 429 responses retain safe reset/retry metadata.
 
-## 16. Observability and health
+## 17. Observability and health
 
 - Logs are structured JSON to stdout or the platform log sink.
 - Logs include request ID, tool, provider, duration, outcome, and result count.
@@ -433,7 +466,7 @@ Errors may include `retry_after_seconds` when known. Raw upstream error bodies a
 - `/readyz` reports configuration and provider initialization readiness without calling upstream services on every request.
 - `make doctor` validates configuration and may perform explicit upstream connectivity checks.
 
-## 17. Testing and release gates
+## 18. Testing and release gates
 
 Required automated verification:
 
@@ -451,7 +484,7 @@ Pull-request CI does not call live providers. Live Twitee/X tests are manually t
 
 A release requires `make check`, Tier 1 smoke tests, and successful packaging.
 
-## 18. OSS distribution and governance
+## 19. OSS distribution and governance
 
 The repository is licensed under MIT and includes:
 
@@ -469,7 +502,7 @@ Each SemVer release publishes:
 - The `twitter-search-mcp` npm package, or a scoped package if the unscoped name is unavailable.
 - Stable Cloudflare and Vercel deployment templates tied to a release rather than `main`.
 
-## 19. Success criteria
+## 20. Success criteria
 
 Version 1 is complete when:
 
@@ -482,3 +515,4 @@ Version 1 is complete when:
 7. Access tokens and provider tokens do not appear in repository-tracked config, logs, health responses, or normal tool errors.
 8. Rate limiting behaves according to each documented runtime scope without claiming global accuracy.
 9. A tagged release produces GitHub, GHCR, and npm artifacts.
+10. Cloudflare, Node, Kubernetes, and Vercel deployments expose the canonical MCP endpoint at `/mcp` with the documented stateless method behavior.
