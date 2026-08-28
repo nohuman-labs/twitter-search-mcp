@@ -20,6 +20,17 @@ it("accepts the configured shared bearer token", async () => {
   ).resolves.toBeUndefined();
 });
 
+it("accepts a shared bearer token with a case-insensitive scheme", async () => {
+  for (const scheme of ["bearer", "BEARER", "BeArEr"]) {
+    await expect(
+      authorize(new Headers({ authorization: `${scheme} correct` }), {
+        mode: "bearer",
+        token: "correct",
+      }),
+    ).resolves.toBeUndefined();
+  }
+});
+
 it("allows anonymous requests without an authorization header", async () => {
   await expect(
     authorize(new Headers(), { mode: "anonymous", token: "" }),

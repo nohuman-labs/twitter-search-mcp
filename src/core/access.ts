@@ -37,7 +37,7 @@ function bearerToken(authorization: string | null): string | undefined {
     return undefined;
   }
 
-  const match = /^Bearer ([^\s]+)$/.exec(authorization);
+  const match = /^Bearer ([^\s]+)$/i.exec(authorization);
   return match?.[1];
 }
 

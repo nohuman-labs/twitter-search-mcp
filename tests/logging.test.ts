@@ -46,3 +46,16 @@ it("writes structured request fields but excludes queries", () => {
     count: 2,
   });
 });
+
+it("redacts cyclic arrays without leaking tokens or queries", () => {
+  const context: unknown[] = ["supplied", { query: "private search" }];
+  context.push(context);
+
+  const output = captureLog(createLogger(["supplied"]), { context });
+
+  expect(output).not.toContain("supplied");
+  expect(output).not.toContain("private search");
+  expect(JSON.parse(output)).toEqual({
+    context: ["[REDACTED]", {}, "[CIRCULAR]"],
+  });
+});

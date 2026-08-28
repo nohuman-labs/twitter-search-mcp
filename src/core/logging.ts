@@ -18,10 +18,6 @@ function redact(
     return redactString(value, tokens);
   }
 
-  if (Array.isArray(value)) {
-    return value.map((item) => redact(item, tokens, seen));
-  }
-
   if (value === null || typeof value !== "object") {
     return value;
   }
@@ -30,6 +26,10 @@ function redact(
     return "[CIRCULAR]";
   }
   seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redact(item, tokens, seen));
+  }
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
