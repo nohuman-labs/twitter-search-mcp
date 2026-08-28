@@ -49,8 +49,10 @@ jobs:
         run: cp mcp.config.example.yaml mcp.config.yaml
       - run: make check
       - run: make build
-      - run: npm run generate:config
+      - if: matrix.node == 22
+        run: npm run generate:config
       - name: Validate generated Cloudflare configuration
+        if: matrix.node == 22
         run: npx wrangler deploy --dry-run --config .generated/wrangler.jsonc
       - name: Inspect release package
         run: npm pack --dry-run --json

@@ -103,6 +103,8 @@ npm run smoke-mcp -- --url http://127.0.0.1:3000/mcp --tool search_posts --input
 
 Cloudflare Workers and Node/Docker are Tier 1 paths. Kubernetes and Vercel are Tier 2 templates. Use the documented commands rather than copying generated output:
 
+The published Node package supports Node.js 20 and newer. Cloudflare generation and deployment use development-only Agents/Wrangler tooling and require Node.js 22.
+
 ```sh
 make deploy-cloudflare
 # With Cloudflare rate limiting enabled:

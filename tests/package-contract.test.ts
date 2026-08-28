@@ -127,6 +127,16 @@ describe("published package", () => {
         "npx wrangler deploy --dry-run --config .generated/wrangler.jsonc",
       ]),
     );
+    const cloudflareSteps = testJob.steps?.filter(
+      (step) =>
+        step.run === "npm run generate:config" ||
+        step.run ===
+          "npx wrangler deploy --dry-run --config .generated/wrangler.jsonc",
+    );
+    expect(cloudflareSteps).toHaveLength(2);
+    expect(
+      cloudflareSteps?.every((step) => step.if === "matrix.node == 22"),
+    ).toBe(true);
     expect(containerJob.needs).toBe("test");
     expect(containerJob.steps?.map((step) => step.run)).toEqual(
       expect.arrayContaining([
@@ -140,6 +150,12 @@ describe("published package", () => {
   it("limits publishing to protected tagged releases", async () => {
     const workflow = await workflowAt(".github/workflows/release.yml");
     const publishJob = workflow.jobs.publish;
+    const cloudflareSteps = workflow.jobs.test.steps?.filter(
+      (step) =>
+        step.run === "npm run generate:config" ||
+        step.run ===
+          "npx wrangler deploy --dry-run --config .generated/wrangler.jsonc",
+    );
 
     expect(workflow.on.push.tags).toEqual(["v*"]);
     expect(workflow.permissions).toEqual({ contents: "read" });
@@ -148,6 +164,10 @@ describe("published package", () => {
       group: tagConcurrencyGroup,
       "cancel-in-progress": false,
     });
+    expect(cloudflareSteps).toHaveLength(2);
+    expect(
+      cloudflareSteps?.every((step) => step.if === "matrix.node == 22"),
+    ).toBe(true);
     expect(publishJob.environment).toBe("release");
     expect(publishJob.permissions).toEqual({
       contents: "write",
