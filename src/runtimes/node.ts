@@ -8,6 +8,9 @@ import {
 import { pathToFileURL } from "node:url";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { loadConfig } from "../config/load.js";
+
+export { loadConfig } from "../config/load.js";
+
 import type { AppConfig } from "../config/schema.js";
 import { authorize } from "../core/access.js";
 import { clientKey } from "../core/client-key.js";
@@ -217,7 +220,7 @@ async function handleMcpRequest(
     response.once("close", abort);
 
     try {
-      mcpServer = mcpServerFactory(config, dependencies);
+      mcpServer = mcpServerFactory(config, { ...dependencies, logger });
       await mcpServer.connect(transport);
       await transport.handleRequest(request, response, parsedBody);
       logger({ method: "POST", path: MCP_PATH, status: response.statusCode });

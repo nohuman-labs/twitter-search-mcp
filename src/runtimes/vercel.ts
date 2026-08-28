@@ -43,7 +43,8 @@ export function createVercelHandler(
   const mcpHandler =
     options.mcpHandler ??
     createMcpHandler(
-      (server) => registerMcpServer(server, options.config, dependencies),
+      (server) =>
+        registerMcpServer(server, options.config, { ...dependencies, logger }),
       {
         serverInfo: { name: "twitter-search-mcp", version: serverVersion },
         maxSubscriptions: 0,

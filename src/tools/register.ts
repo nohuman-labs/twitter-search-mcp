@@ -1,5 +1,6 @@
 import type { McpServer, ToolAnnotations } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import type { Logger } from "../core/logging.js";
 import { SafeError } from "../domain/errors.js";
 import type {
   ProfileResult,
@@ -95,6 +96,7 @@ const readOnlyAnnotations: ToolAnnotations = {
 export type SearchToolsContext = {
   readonly registry: ProviderRegistry;
   readonly providers: readonly SearchProvider[];
+  readonly logger?: Logger;
 };
 
 type SearchPostsInput = z.infer<typeof searchPostsInputSchema>;
@@ -115,14 +117,16 @@ export function registerSearchTools(
         outputSchema: searchPostsOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input, requestContext) =>
-        callTool(() =>
-          searchPosts(
-            context,
-            input as SearchPostsInput,
-            requestContext?.mcpReq.signal,
-          ),
-        ),
+      async (input, requestContext) => {
+        const parsedInput = input as SearchPostsInput;
+        return callTool(
+          context,
+          "search_posts",
+          context.registry.selectedProviderId(parsedInput.provider),
+          () =>
+            searchPosts(context, parsedInput, requestContext?.mcpReq.signal),
+        );
+      },
     );
   }
 
@@ -136,14 +140,16 @@ export function registerSearchTools(
         outputSchema: lookupProfileOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input, requestContext) =>
-        callTool(() =>
-          lookupProfile(
-            context,
-            input as LookupProfileInput,
-            requestContext?.mcpReq.signal,
-          ),
-        ),
+      async (input, requestContext) => {
+        const parsedInput = input as LookupProfileInput;
+        return callTool(
+          context,
+          "lookup_profile",
+          context.registry.selectedProviderId(parsedInput.provider),
+          () =>
+            lookupProfile(context, parsedInput, requestContext?.mcpReq.signal),
+        );
+      },
     );
   }
 
@@ -157,14 +163,16 @@ export function registerSearchTools(
         outputSchema: searchProfilesOutputSchema,
         annotations: readOnlyAnnotations,
       },
-      async (input, requestContext) =>
-        callTool(() =>
-          searchProfiles(
-            context,
-            input as SearchProfilesInput,
-            requestContext?.mcpReq.signal,
-          ),
-        ),
+      async (input, requestContext) => {
+        const parsedInput = input as SearchProfilesInput;
+        return callTool(
+          context,
+          "search_profiles",
+          context.registry.selectedProviderId(parsedInput.provider),
+          () =>
+            searchProfiles(context, parsedInput, requestContext?.mcpReq.signal),
+        );
+      },
     );
   }
 }
@@ -220,12 +228,26 @@ async function searchProfiles(
 }
 
 async function callTool(
+  context: SearchToolsContext,
+  tool: "search_posts" | "lookup_profile" | "search_profiles",
+  provider: "twitee" | "x",
   operation: () => Promise<
     SearchPostsResult | ProfileResult | SearchProfilesResult
   >,
 ) {
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
   try {
-    return success(await operation());
+    const result = await operation();
+    context.logger?.({
+      requestId,
+      tool,
+      provider: result.provider,
+      durationMs: Date.now() - startedAt,
+      outcome: "ok",
+      count: result.items.length,
+    });
+    return success(result);
   } catch (error) {
     const publicError =
       error instanceof SafeError
@@ -234,6 +256,15 @@ async function callTool(
             code: "UPSTREAM_UNAVAILABLE" as const,
             message: "Search provider is temporarily unavailable",
           };
+    context.logger?.({
+      requestId,
+      tool,
+      provider,
+      durationMs: Date.now() - startedAt,
+      outcome: "error",
+      count: 0,
+      code: publicError.code,
+    });
     return {
       content: [{ type: "text" as const, text: JSON.stringify(publicError) }],
       isError: true,

@@ -1,4 +1,3 @@
-export { loadConfig } from "./config/load.js";
 export {
   type AppConfig,
   appConfigSchema,

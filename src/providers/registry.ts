@@ -21,8 +21,12 @@ export class ProviderRegistry {
     );
   }
 
+  selectedProviderId(override?: ProviderId): ProviderId {
+    return override ?? this.config.search.default_provider;
+  }
+
   resolve(tool: ToolName, override?: ProviderId): SearchProvider {
-    const providerId = override ?? this.config.search.default_provider;
+    const providerId = this.selectedProviderId(override);
 
     if (
       override !== undefined &&

@@ -6,6 +6,7 @@ import { ProviderRegistry } from "../providers/registry.js";
 import { createTwiteeProvider } from "../providers/twitee.js";
 import { createXProvider } from "../providers/x.js";
 import { registerSearchTools } from "../tools/register.js";
+import { createLogger, type Logger } from "./logging.js";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -15,6 +16,7 @@ type FetchLike = (
 export type McpServerDependencies = {
   readonly fetch: FetchLike;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly logger?: Logger;
 };
 
 export const serverVersion = packageMetadata.version;
@@ -41,6 +43,13 @@ export function registerMcpServer(
   registerSearchTools(server, {
     registry: new ProviderRegistry(config, providers),
     providers,
+    logger:
+      dependencies.logger ??
+      createLogger([
+        config.access.token,
+        config.providers.twitee.token,
+        config.providers.x.token,
+      ]),
   });
 }
 

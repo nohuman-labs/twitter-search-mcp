@@ -27,7 +27,7 @@ private configuration, generated source, and upstream response bodies.
 | `make build` | PASS | The production TypeScript build completed. |
 | `make doctor` | PASS | The credential-free example configuration was valid; Twitee advertised all three approved capabilities. Connectivity mode was not enabled. |
 | `npm pack --dry-run` | PASS | Prepack build completed; 43 package files were selected. Private YAML and generated configuration were absent. |
-| `docker build -f deploy/docker/Dockerfile -t twitter-search-mcp:rc .` | PASS | Built the local RC image from the pinned Node base image. |
+| `docker build -f deploy/docker/Dockerfile -t twitter-search-mcp:rc .` | PASS | Built the local RC image after Docker resolved the configured Node base tag to an image digest. |
 | `sh tests/container-smoke.sh twitter-search-mcp:rc` | PASS | Verified the non-root image user, read-only container start, `/healthz`, and `/readyz`. |
 | `kubectl kustomize deploy/kubernetes/overlays/example >/dev/null` | PASS | The example Kubernetes overlay rendered locally. No cluster operation occurred. |
 | `npx wrangler deploy --dry-run --config .generated/wrangler.jsonc` | PASS | Wrangler bundled the Worker and exited in dry-run mode. No deployment occurred. |

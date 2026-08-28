@@ -12,4 +12,4 @@ The generated configuration contains tokens: `.generated/config.ts` and generate
 
 Vercel's in-memory rate limiter is per instance. It is an abuse guard rather than durable global quota or accounting. `POST` and `OPTIONS` are supported at `/mcp`; `GET` and `DELETE` return `405`.
 
-The Vercel local API and package build paths are covered by repository tests. A `vercel build` CLI verification has not been established in this environment because local Vercel authentication is invalid; do not treat this guide as proof that a production Vercel deployment has been verified. Run a deployment and smoke test in the target Vercel account.
+The Vercel local API and package build paths are covered by repository tests. A `vercel build` CLI verification has not been established in this environment because the CLI returns `project_settings_required` without project-owned settings; do not treat this guide as proof that a production Vercel deployment has been verified. After an authorized project link or config pull, run a deployment and smoke test in the target Vercel account.

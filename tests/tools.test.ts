@@ -128,6 +128,30 @@ it("returns structured content and an equal JSON fallback", async () => {
   expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
 });
 
+it("logs structured tool outcomes without logging the query", async () => {
+  const logger = vi.fn();
+  const call = tool(
+    captureTools({
+      ...context("twitee", [provider("twitee")]),
+      logger,
+    }),
+    "search_posts",
+  );
+
+  await call.handler({ query: "private search", limit: 20 });
+
+  expect(logger).toHaveBeenCalledOnce();
+  expect(logger).toHaveBeenCalledWith({
+    requestId: expect.any(String),
+    tool: "search_posts",
+    provider: "twitee",
+    durationMs: expect.any(Number),
+    outcome: "ok",
+    count: 0,
+  });
+  expect(JSON.stringify(logger.mock.calls)).not.toContain("private search");
+});
+
 it("passes the MCP request abort signal to the selected provider", async () => {
   const searchPosts = vi.fn(async () => result);
   const call = tool(

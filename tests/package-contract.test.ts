@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import * as rootExports from "../src/index.js";
+import * as nodeExports from "../src/runtimes/node.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +42,11 @@ type WorkflowStep = {
 };
 
 describe("published package", () => {
+  it("keeps filesystem configuration loading on the Node-only export", () => {
+    expect("loadConfig" in rootExports).toBe(false);
+    expect("loadConfig" in nodeExports).toBe(true);
+  });
+
   it("publishes only built runtime files and the required public documents", async () => {
     const pkg = JSON.parse(await readFile("package.json", "utf8"));
 

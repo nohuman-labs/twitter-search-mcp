@@ -93,3 +93,17 @@ it("ships every linked OSS document", async () => {
     await expect(access(path)).resolves.toBeUndefined();
   }
 });
+
+it("keeps deployment documentation aligned with verified release state", async () => {
+  const kubernetes = await read(
+    "deploy/kubernetes/overlays/example/kustomization.yaml",
+  );
+  const vercel = await read("vercel.md");
+  const releaseCandidate = await read("docs/verification/v1-rc.md");
+
+  expect(kubernetes).not.toMatch(/newTag:\s*latest/);
+  expect(kubernetes).toMatch(/newTag:\s*1\.0\.0/);
+  expect(vercel).toContain("project_settings_required");
+  expect(vercel).not.toMatch(/authentication is invalid/i);
+  expect(releaseCandidate).not.toContain("pinned Node base image");
+});

@@ -5,4 +5,4 @@ resources:
 images:
   - name: twitter-search-mcp
     newName: ghcr.io/example/twitter-search-mcp
-    newTag: latest
+    newTag: 1.0.0
