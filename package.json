@@ -8,6 +8,7 @@
     "dev": "tsx src/runtimes/node.ts",
     "doctor": "tsx scripts/doctor.ts",
     "generate:config": "tsx scripts/generate-config.ts",
+    "smoke-mcp": "tsx scripts/smoke-mcp.ts",
     "test": "vitest"
   },
   "keywords": [],
