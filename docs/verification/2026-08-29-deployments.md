@@ -37,7 +37,9 @@ safe code fields; it did not contain the search query.
 - Generated configuration: credential-free anonymous Twitee configuration
 - Remote permanent deployment: PASS
 - Public endpoint: `https://twitter-search-mcp.my-account-9e4.workers.dev/mcp`
-- Worker version: `ac05ddf7-810d-47c1-8d94-b9fa29e8b5ec`
+- Worker version: `3714ed56-06dd-4573-89e8-1b1eb28646bc`
+- Public source: `https://github.com/nohuman-labs/twitter-search-mcp`
+- GitHub Actions deployment: `https://github.com/nohuman-labs/twitter-search-mcp/actions/runs/33223919463`
 
 The local Worker runtime returned 200 from `/healthz` and `/readyz`, completed
 MCP initialize and `tools/list`, advertised all three Twitee tools, returned 405
@@ -54,8 +56,11 @@ upstream intermittently returned HTTP 502. Independent direct checks also
 observed both HTTP 200 and HTTP 502. The Worker deployment and MCP protocol
 path were healthy; only the external provider result was unstable.
 
+The first `main` workflow run loaded the account ID and API token from GitHub
+Actions secrets, created the credential-free Twitee configuration, passed the
+repository checks, and deployed the permanent Worker successfully.
+
 ## Remaining external requirements
 
 - Twitee upstream recovery before a live Twitee search can return results.
-- GitHub repository ownership and npm authentication before public release
-  artifacts can be created.
+- npm authentication before an optional npm package release can be created.
