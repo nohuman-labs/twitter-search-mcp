@@ -15,7 +15,13 @@ type PackageExports = Record<
 >;
 
 type Workflow = {
-  readonly on: { readonly push: { readonly tags: readonly string[] } };
+  readonly on: {
+    readonly push: {
+      readonly branches?: readonly string[];
+      readonly tags?: readonly string[];
+    };
+    readonly workflow_dispatch?: Record<string, never>;
+  };
   readonly concurrency?: {
     readonly group?: string;
     readonly "cancel-in-progress"?: boolean;
@@ -25,6 +31,7 @@ type Workflow = {
 };
 
 type WorkflowJob = {
+  readonly env?: Record<string, string>;
   readonly environment?: string;
   readonly needs?: string;
   readonly permissions?: Record<string, string>;
@@ -181,6 +188,34 @@ describe("published package", () => {
       packages: "write",
       "id-token": "write",
     });
+  });
+
+  it("deploys the credential-free default to Cloudflare from main", async () => {
+    const workflow = await workflowAt(
+      ".github/workflows/deploy-cloudflare.yml",
+    );
+    const deploy = workflow.jobs.deploy;
+    const tokenSecret = ["$", "{{ secrets.CLOUDFLARE_API_TOKEN }}"].join("");
+    const accountSecret = ["$", "{{ secrets.CLOUDFLARE_ACCOUNT_ID }}"].join("");
+
+    expect(workflow.on.push.branches).toEqual(["main"]);
+    expect(workflow.on.workflow_dispatch).toEqual({});
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(workflow.concurrency).toEqual({
+      group: "cloudflare-production",
+      "cancel-in-progress": false,
+    });
+    expect(deploy.env).toEqual({
+      CLOUDFLARE_API_TOKEN: tokenSecret,
+      CLOUDFLARE_ACCOUNT_ID: accountSecret,
+    });
+    expect(deploy.steps?.map((step) => step.run)).toEqual(
+      expect.arrayContaining([
+        "npm ci",
+        "cp mcp.config.example.yaml mcp.config.yaml",
+        "make deploy-cloudflare",
+      ]),
+    );
   });
 
   it("prepares and inspects the exact package version before publishing", async () => {

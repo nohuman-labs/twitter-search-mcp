@@ -35,29 +35,27 @@ safe code fields; it did not contain the search query.
 - Wrangler 4.127.0 dry-run: PASS
 - Wrangler local Worker runtime: PASS
 - Generated configuration: credential-free anonymous Twitee configuration
-- Remote temporary deployment: PASS
-- Public endpoint: `https://twitter-search-mcp.extreme-daemonosaurus.workers.dev/mcp`
-- Worker version: `f8e0351a-ac24-4dd5-9bac-9c321c4e1291`
+- Remote permanent deployment: PASS
+- Public endpoint: `https://twitter-search-mcp.my-account-9e4.workers.dev/mcp`
+- Worker version: `ac05ddf7-810d-47c1-8d94-b9fa29e8b5ec`
 
 The local Worker runtime returned 200 from `/healthz` and `/readyz`, completed
 MCP initialize and `tools/list`, advertised all three Twitee tools, returned 405
 from `GET /mcp`, and returned 404 from `GET /sse`.
 
-After the user explicitly accepted Cloudflare's Terms of Service and Privacy
-Policy, Wrangler created a temporary preview account and deployed the Worker.
-The remote endpoint returned 200 from `/healthz` and `/readyz`, completed MCP
-initialize and `tools/list`, advertised all three Twitee tools, returned 405
-from `GET /mcp`, 404 from `GET /sse`, and 204 from originless
-`OPTIONS /mcp`. Worker startup time was 87 ms.
+After the user configured an account-scoped Cloudflare API token, Wrangler
+deployed the Worker to the user's permanent account. The remote endpoint
+returned 200 from `/healthz` and `/readyz`, completed MCP initialize and
+`tools/list`, advertised all three Twitee tools, returned 405 from `GET /mcp`,
+and returned 404 from `GET /sse`.
 
-A live remote Twitee tool call returned the safe MCP error because the Twitee
-upstream remained HTTP 502. The Worker deployment and MCP protocol path were
-healthy; only the external provider result was unavailable.
+A live remote Twitee tool call returned the safe MCP error while the Twitee
+upstream intermittently returned HTTP 502. Independent direct checks also
+observed both HTTP 200 and HTTP 502. The Worker deployment and MCP protocol
+path were healthy; only the external provider result was unstable.
 
 ## Remaining external requirements
 
-- Claim the temporary Worker into the user's Cloudflare account before its
-  claim window expires; the claim URL is intentionally not stored here.
 - Twitee upstream recovery before a live Twitee search can return results.
 - GitHub repository ownership and npm authentication before public release
   artifacts can be created.
