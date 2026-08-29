@@ -35,21 +35,29 @@ safe code fields; it did not contain the search query.
 - Wrangler 4.127.0 dry-run: PASS
 - Wrangler local Worker runtime: PASS
 - Generated configuration: credential-free anonymous Twitee configuration
-- Remote deployment: BLOCKED before upload
+- Remote temporary deployment: PASS
+- Public endpoint: `https://twitter-search-mcp.extreme-daemonosaurus.workers.dev/mcp`
+- Worker version: `f8e0351a-ac24-4dd5-9bac-9c321c4e1291`
 
 The local Worker runtime returned 200 from `/healthz` and `/readyz`, completed
 MCP initialize and `tools/list`, advertised all three Twitee tools, returned 405
 from `GET /mcp`, and returned 404 from `GET /sse`.
 
-The local Wrangler session is not authenticated. The supported temporary
-deployment path requested explicit acceptance of Cloudflare's Terms of Service
-and Privacy Policy. The prompt was cancelled because accepting legal terms
-requires the user's explicit action. No Worker was created or changed.
+After the user explicitly accepted Cloudflare's Terms of Service and Privacy
+Policy, Wrangler created a temporary preview account and deployed the Worker.
+The remote endpoint returned 200 from `/healthz` and `/readyz`, completed MCP
+initialize and `tools/list`, advertised all three Twitee tools, returned 405
+from `GET /mcp`, 404 from `GET /sse`, and 204 from originless
+`OPTIONS /mcp`. Worker startup time was 87 ms.
+
+A live remote Twitee tool call returned the safe MCP error because the Twitee
+upstream remained HTTP 502. The Worker deployment and MCP protocol path were
+healthy; only the external provider result was unavailable.
 
 ## Remaining external requirements
 
-- Explicit user acceptance of Cloudflare's terms, or an authenticated Wrangler
-  session, before a remote Worker can be deployed.
+- Claim the temporary Worker into the user's Cloudflare account before its
+  claim window expires; the claim URL is intentionally not stored here.
 - Twitee upstream recovery before a live Twitee search can return results.
 - GitHub repository ownership and npm authentication before public release
   artifacts can be created.
